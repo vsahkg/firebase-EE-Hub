@@ -9,7 +9,7 @@ import { HubError, normalizeEmail, text } from './util';
 initializeApp();
 const store = new Store(getFirestore());
 
-export const eeHub = onCall({ cors: true, invoker: 'public', timeoutSeconds: 120, memory: '512MiB' }, async (request) => {
+export const eeHub = onCall({ region: 'asia-east2', cors: true, invoker: 'public', timeoutSeconds: 120, memory: '512MiB' }, async (request) => {
   const method = text(request.data?.method);
   const args = Array.isArray(request.data?.args) ? request.data.args : [];
   const email = normalizeEmail(request.auth?.token?.email || '');

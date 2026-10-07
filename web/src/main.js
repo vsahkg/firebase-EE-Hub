@@ -11,7 +11,7 @@ const config = {
 
 const app = initializeApp(config);
 const auth = getAuth(app);
-const functions = getFunctions(app);
+const functions = getFunctions(app, 'asia-east2');
 const useEmulators = import.meta.env.VITE_USE_EMULATORS === 'true';
 
 if (useEmulators) {
