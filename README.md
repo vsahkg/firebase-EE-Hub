@@ -183,6 +183,8 @@ Admin → Sheets exports the collections an admin or coordinator selects into a 
 
 Coordinators open Allocation to draft a supervisor and subject for each active student. Slots are individual tokens. A tab named `SUPERVISORTOKENS: 2026` has StaffEmail, Quota, and EligibleSubjects. Ingest adds missing tokens and leaves draft or committed slots as they are. Admin → Staff users → EE quotas edits the standing quota and `EESubjects` on each staff record, shows overlapped subject capacity, and can export that `SUPERVISORTOKENS` sheet or apply the same top-up into a cohort. Allocation → Cohort tokens edits the tokens already on a cohort. A tab named `COHORTDATA: 2026` has StudentId, an optional SubjectChoice JSON cell, columns that start with `Choice_`, and any other column the dashboard can show. Publish writes the drafted supervisor and subject onto that student's roster row. Students with Active for allocation unchecked stay off the dashboard. Allocation settings, on that tab and under Admin, choose the choice keys and columns.
 
+On Allocation → Department, heads of department suggest teachers and may add a note for the coordinator, who sees it on the dashboard. Notes remain when the suggested teacher changes and can be edited until the department is certified or the allocation is published. The department count covers active students whose selected subject belongs to the displayed department; the cohort count covers all active students. Both counts show students with a suggested teacher over the total.
+
 4. From this repo:
 
 ```bash

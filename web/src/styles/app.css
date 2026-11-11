@@ -849,6 +849,15 @@ main.staff-list { max-width: 1480px; }
 .alloc-hod-status-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 8px 10px; background: white; border: 1px solid var(--line); border-radius: 4px; }
 .alloc-hod-lock select { color: var(--muted); }
 .alloc-hod-warn { margin: 8px 0 0; }
+.alloc-hod-subject { display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: start; gap: 8px; }
+.alloc-hod-subject-tag { white-space: nowrap; }
+.alloc-hod-stats { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--muted); font-size: 12px; }
+.alloc-hod-suggestion { display: flex; align-items: flex-start; gap: 8px; }
+.alloc-hod-suggestion select { min-width: 0; max-width: 100%; }
+.alloc-hod-note-button, .alloc-hod-note-text { min-width: 0; flex: 1 1 100px; overflow-wrap: anywhere; white-space: pre-wrap; font-size: 12px; }
+.alloc-hod-note-button { padding: 2px 0; border: 0; background: transparent; color: var(--green); text-align: left; text-decoration: underline; cursor: pointer; }
+.alloc-suggestion-note { margin: 4px 0; color: var(--muted); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+#alloc-suggestion-note-input { display: block; width: 100%; max-width: 100%; }
 .alloc-teacher-select { width: 100%; min-width: 160px; padding: 7px 9px; color: var(--ink); background: white; border: 1px solid var(--line); border-radius: 3px; }
 .alloc-teacher-select option.alloc-teacher-empty,
 .alloc-batch select option.alloc-teacher-empty {

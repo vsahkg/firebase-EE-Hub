@@ -205,6 +205,10 @@ export class Store {
     await this.workspace(cohortId).doc(studentId).set(cleanDoc(data));
   }
 
+  async updateWorkspace(cohortId: string, studentId: string, data: Doc): Promise<void> {
+    await this.workspace(cohortId).doc(studentId).set(cleanDoc(data), { merge: true });
+  }
+
   allocationConfig(cohortId: string) {
     return this.db.collection(COLLECTIONS.cohorts).doc(cohortId).collection('allocationConfig').doc('settings');
   }
