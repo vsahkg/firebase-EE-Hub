@@ -8,11 +8,102 @@ import { Doc } from './util';
 
 class Reference {
   constructor(public path: string, public isDocument: boolean, public field = '', public value = '') {}
+  get id() { return this.path.split('/').pop() || ''; }
   doc(id = `archive-${Reference.next++}`) { return new Reference(`${this.path}/${id}`, true); }
   static next = 0;
   collection(name: string) { return new Reference(`${this.path}/${name}`, false); }
   where(field: string, _operator: string, value: string) { return new Reference(this.path, false, field, value); }
 }
+
+test('cohort assignment review creates missing tasks, restores archives and preserves modified progress', async () => {
+  const db = new FakeFirestore();
+  const store = new Store(db as unknown as Firestore);
+  const cohort = `${COLLECTIONS.cohorts}/2027`;
+  const member = 'student@example.edu';
+  const other = 'other@example.edu';
+  const m1 = { milestoneId: 'm1', phase: 'topic', milestoneTitle: 'Draft', milestoneDescription: 'Write', offsetDays: 10, DueTime: '16:00' };
+  const m2 = { milestoneId: 'm2', phase: 'topic', milestoneTitle: 'Review', milestoneDescription: 'Read', offsetDays: 5, DueTime: '' };
+  const task = { TaskId: 'existing', StudentId: member, CreatorType: 'System', TemplateId: 'm1', cohortId: '2027', Status: 'Completed', Title: 'Edited', DueDate: '2027-01-01', note: 'keep' };
+  const archived = { TaskId: 'old', StudentId: member, CreatorType: 'System', TemplateId: 'm2', cohortId: '2027', Status: 'In Progress', Title: 'Old', DueDate: '2027-03-01' };
+  db.records.set(cohort, { PathwaySeeded: true, PlanAnchor: '2027-12-01' });
+  db.records.set(`${cohort}/phases/topic`, { phaseId: 'topic', active: true });
+  db.records.set(`${cohort}/milestones/m1`, m1);
+  db.records.set(`${cohort}/milestones/m2`, m2);
+  db.records.set(`${cohort}/members/${member}`, { StudentId: member, Anchor_Date: '2027-11-01' });
+  db.records.set(`${cohort}/members/${other}`, { StudentId: other });
+  db.records.set(`${COLLECTIONS.studentActionItems}/existing`, task);
+  db.records.set(`${cohort}/milestoneAssignmentArchive/old`, { task: archived, milestone: m2 });
+  const students = [other, member];
+  const ids = ['m1', 'm2'];
+  const preview = await store.reconcileCohortAssignments('2027', students, ids, 'missing', 'admin');
+  assert.deepEqual([preview.created, preview.restored, preview.updated, preview.unchanged, preview.fallbackAnchors], [2, 1, 0, 1, 1]);
+  assert.deepEqual(db.records.get(`${COLLECTIONS.studentActionItems}/existing`), task);
+  await store.reconcileCohortAssignments('2027', students, ids, 'missing', 'admin', preview.signature);
+  assert.deepEqual(db.records.get(`${COLLECTIONS.studentActionItems}/old`), archived);
+  assert.equal(db.records.has(`${cohort}/milestoneAssignmentArchive/old`), false);
+  const created = [...db.records.values()].find((row) => row.StudentId === other && row.TemplateId === 'm1');
+  assert.equal(created?.DueDate, '2027-11-21');
+  assert.equal(created?.DueTime, '16:00');
+  assert.equal(db.records.get(`${cohort}/members/${other}`)?.Anchor_Date, undefined);
+  const reapply = await store.reconcileCohortAssignments('2027', students, ids, 'reapply', 'admin');
+  assert.equal(reapply.updated, 2);
+  await store.reconcileCohortAssignments('2027', students, ids, 'reapply', 'admin', reapply.signature);
+  assert.equal(db.records.get(`${COLLECTIONS.studentActionItems}/existing`)?.DueDate, '2027-10-22');
+  assert.equal(db.records.get(`${COLLECTIONS.studentActionItems}/existing`)?.Status, 'Completed');
+  assert.equal(db.records.get(`${COLLECTIONS.studentActionItems}/existing`)?.note, 'keep');
+  assert.equal(db.records.get(`${COLLECTIONS.studentActionItems}/old`)?.Status, 'In Progress');
+});
+
+test('cohort assignment review blocks stale previews and conflicting archives without writes', async () => {
+  const db = new FakeFirestore();
+  const store = new Store(db as unknown as Firestore);
+  const cohort = `${COLLECTIONS.cohorts}/2027`;
+  const member = 'student@example.edu';
+  const milestone = { milestoneId: 'm1', phase: 'topic', milestoneTitle: 'Draft', offsetDays: 5 };
+  db.records.set(cohort, { PathwaySeeded: true, PlanAnchor: '2027-12-01' });
+  db.records.set(`${cohort}/phases/topic`, { active: true });
+  db.records.set(`${cohort}/milestones/m1`, milestone);
+  db.records.set(`${cohort}/members/${member}`, { StudentId: member });
+  const preview = await store.reconcileCohortAssignments('2027', [member], ['m1'], 'missing', 'admin');
+  db.records.set(`${cohort}/milestones/m1`, { ...milestone, milestoneTitle: 'Changed' });
+  const before = new Map(db.records);
+  await assert.rejects(store.reconcileCohortAssignments('2027', [member], ['m1'], 'missing', 'admin', preview.signature), /changed since the preview/);
+  assert.deepEqual(db.records, before);
+  db.records.set(`${cohort}/milestoneAssignmentArchive/a`, { task: { TaskId: 'old', StudentId: member, TemplateId: 'm1', CreatorType: 'System', cohortId: '2027' }, milestone });
+  await assert.rejects(store.reconcileCohortAssignments('2027', [member], ['m1'], 'missing', 'admin'), /archived assignment.*conflicts/);
+  assert.equal(db.records.has(`${cohort}/milestoneAssignmentArchive/a`), true);
+  db.records.delete(`${cohort}/milestoneAssignmentArchive/a`);
+  db.records.set(`${COLLECTIONS.studentActionItems}/legacy`, { TaskId: 'legacy', StudentId: member, TemplateId: 'm1', CreatorType: 'System' });
+  await assert.rejects(store.reconcileCohortAssignments('2027', [member], ['m1'], 'missing', 'admin'), /missing or different cohort ID/);
+});
+
+test('reapplying an archived assignment preserves progress and detects duplicate archives', async () => {
+  const db = new FakeFirestore();
+  const store = new Store(db as unknown as Firestore);
+  const cohort = `${COLLECTIONS.cohorts}/2027`;
+  const student = 'student@example.edu';
+  const milestone = { milestoneId: 'm1', phase: 'topic', milestoneTitle: 'Draft', offsetDays: 5, DueTime: '12:30' };
+  const task = { TaskId: 'old', StudentId: student, TemplateId: 'm1', CreatorType: 'System', cohortId: '2027', Title: 'Edited', Status: 'Completed', history: ['done'] };
+  db.records.set(cohort, { PathwaySeeded: true, PlanAnchor: '2027-12-01' });
+  db.records.set(`${cohort}/phases/topic`, { active: true });
+  db.records.set(`${cohort}/milestones/m1`, milestone);
+  db.records.set(`${cohort}/members/${student}`, { StudentId: student });
+  db.records.set(`${cohort}/milestoneAssignmentArchive/a`, { task, milestone });
+  db.records.set(`${cohort}/milestoneAssignmentArchive/b`, { task: { ...task, TaskId: 'other' }, milestone });
+  const before = new Map(db.records);
+  await assert.rejects(store.reconcileCohortAssignments('2027', [student], ['m1'], 'reapply', 'admin'), /Multiple archived assignments/);
+  assert.deepEqual(db.records, before);
+  db.records.delete(`${cohort}/milestoneAssignmentArchive/b`);
+  const review = await store.reconcileCohortAssignments('2027', [student], ['m1'], 'reapply', 'admin');
+  assert.equal(review.restored, 1);
+  await store.reconcileCohortAssignments('2027', [student], ['m1'], 'reapply', 'admin', review.signature);
+  const restored = db.records.get(`${COLLECTIONS.studentActionItems}/old`);
+  assert.equal(restored?.Title, 'Draft');
+  assert.equal(restored?.DueDate, '2027-11-26');
+  assert.equal(restored?.DueTime, '12:30');
+  assert.equal(restored?.Status, 'Completed');
+  assert.deepEqual(restored?.history, ['done']);
+});
 
 class FakeFirestore {
   records = new Map<string, Doc>();

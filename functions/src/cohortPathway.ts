@@ -3,8 +3,9 @@ import { validatePhasePrerequisites } from './phaseRules';
 import { milestoneDocsFor, phaseDocsFor, requireCohort } from './roster';
 import { COLLECTIONS, normalizePhaseColor, validateRecordFields } from './schema';
 import { App, audited, requireAdmin } from './session';
-import { addDays, Doc, dueTimeValue, HubError, nowIso, parseActionDate, serializeDateOnly, text, toBoolean } from './util';
+import { addDays, Doc, dueTimeValue, HubError, nowIso, parseActionDate, serializeDateOnly, text, toBoolean, validateEmail } from './util';
 import { milestoneAssignmentScope } from './milestoneManagement';
+import { CohortAssignmentMode } from './store';
 
 const PLAN_ANCHOR = 'PlanAnchor';
 const PLAN_SEEDED = 'PathwaySeeded';
@@ -260,6 +261,35 @@ export async function resetCohortPathway(app: App, cohortId: unknown) {
   const cohort = await requireSeededCohort(app, cohortId);
   return audited(app, user, 'RESET_COHORT_PATHWAY', { cohortId: cohort }, () =>
     app.store.resetCohortPathway(cohort, user.email, nowIso()));
+}
+
+function assignmentSelection(students: unknown, milestones: unknown, mode: unknown) {
+  if (!Array.isArray(students) || !students.length) throw new HubError('Select at least one student.');
+  if (!Array.isArray(milestones) || !milestones.length || milestones.some((id) => typeof id !== 'string' || !text(id) || text(id).includes('/'))) {
+    throw new HubError('Select at least one valid milestone.');
+  }
+  const studentIds = students.map((value) => validateEmail(value, 'StudentId')).sort();
+  const milestoneIds = milestones.map(text).sort();
+  if (new Set(studentIds).size !== studentIds.length || new Set(milestoneIds).size !== milestoneIds.length) throw new HubError('Duplicate selections are not allowed.');
+  if (mode !== 'missing' && mode !== 'reapply') throw new HubError('Choose an assignment mode.');
+  return { studentIds, milestoneIds, mode: mode as CohortAssignmentMode };
+}
+
+export async function previewCohortAssignments(app: App, cohortId: unknown, students: unknown, milestones: unknown, mode: unknown) {
+  const user = await requireAdmin(app, 'PREVIEW_COHORT_ASSIGNMENTS');
+  const cohort = await requireSeededCohort(app, cohortId);
+  const selection = assignmentSelection(students, milestones, mode);
+  return app.store.reconcileCohortAssignments(cohort, selection.studentIds, selection.milestoneIds, selection.mode, user.email);
+}
+
+export async function applyCohortAssignments(app: App, cohortId: unknown, students: unknown, milestones: unknown, mode: unknown, signature: unknown) {
+  const user = await requireAdmin(app, 'APPLY_COHORT_ASSIGNMENTS');
+  const cohort = await requireSeededCohort(app, cohortId);
+  const selection = assignmentSelection(students, milestones, mode);
+  const token = text(signature);
+  if (!/^[a-f0-9]{64}$/.test(token)) throw new HubError('Preview assignments before applying changes.');
+  return audited(app, user, 'APPLY_COHORT_ASSIGNMENTS', { cohortId: cohort, ...selection }, () =>
+    app.store.reconcileCohortAssignments(cohort, selection.studentIds, selection.milestoneIds, selection.mode, user.email, token));
 }
 
 export async function previewCohortMilestoneAssignments(app: App, cohortId: unknown, milestoneId: unknown) {

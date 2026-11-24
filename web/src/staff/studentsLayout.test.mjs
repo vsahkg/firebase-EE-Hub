@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { state } from '../shared/state.js';
 import { staffStudentDrawersHtml } from '../shared/studentDrawers.js';
-import { rememberStaffViewMode, renderCohortJourney, renderListJourney, renderStaffStudentList, staffJourneyPhases, staffViewMode, staffViewModeControl } from './students.js';
+import { bindCohortJourney, rememberStaffViewMode, renderCohortJourney, renderListJourney, renderStaffStudentList, staffJourneyPhases, staffViewMode, staffViewModeControl } from './students.js';
 
 const home = {
   canEditMilestones: false,
@@ -59,6 +60,38 @@ test('cohort journey groups visible students by date and time and escapes names'
   assert.match(html, /Not assigned · 1 student/);
   assert.match(html, /Amy &lt;Chen&gt;/);
   assert.doesNotMatch(html, /<details open/);
+});
+
+test('cohort journey can be closed by button or Escape, restoring focus', () => {
+  function element() {
+    return {
+      listeners: {}, attributes: {}, focused: false,
+      addEventListener(type, handler) { this.listeners[type] = handler; },
+      setAttribute(name, value) { this.attributes[name] = value; },
+      focus() { this.focused = true; },
+    };
+  }
+  const drawer = element();
+  const open = element();
+  const close = element();
+  bindCohortJourney(drawer, open, close);
+  open.listeners.click();
+  assert.equal(drawer.hidden, false);
+  assert.equal(open.attributes['aria-expanded'], 'true');
+  assert.equal(close.focused, true);
+  close.listeners.click();
+  assert.equal(drawer.hidden, true);
+  assert.equal(open.attributes['aria-expanded'], 'false');
+  assert.equal(open.focused, true);
+  open.listeners.click();
+  drawer.listeners.keydown({ key: 'Escape' });
+  assert.equal(drawer.hidden, true);
+  assert.equal(open.attributes['aria-expanded'], 'false');
+});
+
+test('cohort journey header stays below the sticky topbar', () => {
+  const css = readFileSync(new URL('../styles/app.css', import.meta.url), 'utf8');
+  assert.match(css, /\.cohort-journey-drawer:not\(\[hidden\]\)\s*\{[^}]*top:\s*var\(--topbar-height,\s*40px\)/);
 });
 
 test('list rows follow viewMode and the column no longer has its own expand button', () => {

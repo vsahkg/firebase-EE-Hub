@@ -401,6 +401,23 @@ export function bindListJourneyTips(root) {
   });
 }
 
+export function bindCohortJourney(journeyDrawer, journeyOpen, journeyClose) {
+  function closeJourney() {
+    journeyDrawer.hidden = true;
+    journeyOpen.setAttribute('aria-expanded', 'false');
+    journeyOpen.focus();
+  }
+  journeyOpen.addEventListener('click', function() {
+    journeyDrawer.hidden = false;
+    journeyOpen.setAttribute('aria-expanded', 'true');
+    journeyClose.focus();
+  });
+  journeyClose.addEventListener('click', closeJourney);
+  journeyDrawer.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') closeJourney();
+  });
+}
+
 export function paintStaffCards(home) {
   const main = document.getElementById('main');
   const mode = staffViewMode();
@@ -436,7 +453,7 @@ export function paintStaffCards(home) {
       <label><input type="checkbox" id="staff-mine" ${state.staffMine ? 'checked' : ''}> My students</label>
       <input id="staff-search" type="search" placeholder="Search students" value="${escapeHtml(state.staffQuery)}" aria-label="Search students">
       <span class="muted">${students.length}${students.length === total ? '' : ' of ' + total} students</span>
-      <button type="button" class="button secondary" id="open-cohort-journey">Journey</button>
+      <button type="button" class="button secondary" id="open-cohort-journey" aria-controls="cohort-journey-drawer" aria-expanded="false">Journey</button>
       <button type="button" class="button secondary" id="open-email-desk">Email reminders</button>
       ${mayManageSupervisorTodos(state.user) ? '<button type="button" class="button secondary" id="open-supervisor-todos">Supervisor to-dos</button>' : ''}
       ${canEditMilestones ? `<label><input type="checkbox" class="student-pick" id="staff-select-visible" ${allVisibleSelected ? 'checked' : ''} ${students.length ? '' : 'disabled'} aria-label="Select all students in this list"> Select all</label><span class="muted" id="staff-selected-count">${state.staffSelected.length} selected</span><button type="button" class="button secondary" id="edit-milestones" ${state.staffSelected.length ? '' : 'disabled'}>Edit Milestones</button>` : ''}
@@ -447,18 +464,14 @@ export function paintStaffCards(home) {
     ${students.length ? (mode === 'tiles' ? renderStaffStudentTiles(students, phaseName, canEditMilestones) : renderStaffStudentList(home, students)) : '<div class="empty">No students match this view.</div>'}
     </div>
     <aside class="cohort-journey-drawer" id="cohort-journey-drawer" aria-label="Cohort Journey" hidden>
-      <div class="journey-panel-bar"><strong>Journey</strong><button type="button" id="close-cohort-journey">Close</button></div>
+      <div class="journey-panel-bar"><strong>Journey</strong><button type="button" id="close-cohort-journey">Close Journey</button></div>
       <div class="journey-scroll"><p class="muted">Milestones for the ${students.length} students in this view.</p>${renderCohortJourney(home, students)}</div>
     </aside>`;
   bindUnreadNotices(main, true);
   const journeyDrawer = document.getElementById('cohort-journey-drawer');
   const journeyOpen = document.getElementById('open-cohort-journey');
   const journeyClose = document.getElementById('close-cohort-journey');
-  journeyOpen.addEventListener('click', function() { journeyDrawer.hidden = false; journeyClose.focus(); });
-  journeyClose.addEventListener('click', function() { journeyDrawer.hidden = true; journeyOpen.focus(); });
-  journeyDrawer.addEventListener('keydown', function(event) {
-    if (event.key === 'Escape') { journeyDrawer.hidden = true; journeyOpen.focus(); }
-  });
+  bindCohortJourney(journeyDrawer, journeyOpen, journeyClose);
   document.getElementById('open-email-desk').addEventListener('click', function() {
     state.emailDesk = true;
     state.supervisorDesk = false;

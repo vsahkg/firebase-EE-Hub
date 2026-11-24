@@ -223,6 +223,28 @@ test('reset dispatch requires admin and a seeded cohort', async () => {
   assert.deepEqual(plan.milestones.records, []);
 });
 
+test('assignment preview and apply require admin, valid selections and a reviewed signature', async () => {
+  const store = new MemoryStore();
+  await seedTemplate(store);
+  const app = appFor(store, coordinator);
+  await seedCohortPathway(app, '2027', { kind: 'template' }, '2027-12-01');
+  const calls: unknown[][] = [];
+  app.store.reconcileCohortAssignments = async (...args) => {
+    calls.push(args);
+    return { created: 1, restored: 0, updated: 0, unchanged: 0, fallbackAnchors: 1, signature: 'a'.repeat(64) };
+  };
+  await assert.rejects(dispatch(appFor(store, student), 'previewCohortAssignments', ['2027', [student.email], ['m1'], 'missing']), /Access denied/);
+  await assert.rejects(dispatch(app, 'previewCohortAssignments', ['2027', [student.email, student.email], ['m1'], 'missing']), /Duplicate/);
+  await assert.rejects(dispatch(app, 'previewCohortAssignments', ['2027', [student.email], ['m1'], 'other']), /assignment mode/);
+  await assert.rejects(dispatch(app, 'applyCohortAssignments', ['2027', [student.email], ['m1'], 'missing', 'invalid']), /Preview assignments/);
+  assert.equal(calls.length, 0);
+  await dispatch(app, 'previewCohortAssignments', ['2027', [student.email], ['m1'], 'missing']);
+  await dispatch(app, 'applyCohortAssignments', ['2027', [student.email], ['m1'], 'missing', 'a'.repeat(64)]);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0][5], undefined);
+  assert.equal(calls[1][5], 'a'.repeat(64));
+});
+
 test('seeding a cohort copies the template onto a new anchor and leaves the template alone', async () => {
   const store = new MemoryStore();
   await seedTemplate(store);

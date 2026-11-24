@@ -1,10 +1,13 @@
 import { Firestore, Transaction } from 'firebase-admin/firestore';
 import { nextDocCommentSyncWrite, pairRecordId } from './docCommentsPure';
 import { COLLECTIONS } from './schema';
-import { cleanDoc, Doc, HubError, normalizeEmail, parseDriveId, text, toBoolean } from './util';
+import { addDays, cleanDoc, Doc, dueTimeValue, HubError, normalizeEmail, nowIso, parseActionDate, parseDriveId, serializeDateOnly, shortId, text, toBoolean } from './util';
 import { milestoneAssignmentScope } from './milestoneManagement';
 import { actionStudentId, actionTemplateId, creatorKind } from './actionIdentifiers';
 import { isDeepStrictEqual } from 'node:util';
+import { createHash } from 'node:crypto';
+
+export type CohortAssignmentMode = 'missing' | 'reapply';
 
 function tokenWithoutInterdisciplinary(data: Doc): Doc {
   const token = { ...data };
@@ -63,6 +66,119 @@ export class Store {
 
   async listMilestoneActionItems(milestoneId: string): Promise<Doc[]> {
     return (await this.milestoneActionDocuments(milestoneId)).map((doc) => doc.data() as Doc);
+  }
+
+  async reconcileCohortAssignments(cohortId: string, studentIds: string[], milestoneIds: string[], mode: CohortAssignmentMode, actor: string, signature?: string) {
+    return this.db.runTransaction(async (transaction) => {
+      const cohortRef = this.col(COLLECTIONS.cohorts).doc(cohortId);
+      const memberRefs = studentIds.map((id) => this.members(cohortId).doc(id));
+      const milestoneRefs = milestoneIds.map((id) => this.cohortMilestones(cohortId).doc(id));
+      const [cohort, members, milestones, phases, archiveSnapshot, taskGroups] = await Promise.all([
+        transaction.get(cohortRef),
+        Promise.all(memberRefs.map((ref) => transaction.get(ref))),
+        Promise.all(milestoneRefs.map((ref) => transaction.get(ref))),
+        transaction.get(this.cohortPhases(cohortId)),
+        transaction.get(this.cohortMilestoneArchives(cohortId)),
+        Promise.all(milestoneIds.map((id) => this.milestoneActionDocuments(id, transaction))),
+      ]);
+      if (!cohort.exists || !toBoolean(cohort.data()?.PathwaySeeded)) throw new HubError('The cohort pathway changed. Refresh and try again.');
+      const phaseIds = new Set(phases.docs.filter((doc) => toBoolean(doc.data().active)).map((doc) => doc.id));
+      const identities = new Set<string>();
+      const memberData = members.map((doc, index) => {
+        const row = doc.data();
+        if (!doc.exists || !row || normalizeEmail(row.StudentId) !== studentIds[index]) throw new HubError('A selected student is no longer in this cohort. Refresh and try again.');
+        const aliases = [...new Set([normalizeEmail(row.StudentId), normalizeEmail(row['Student Email'])].filter(Boolean))];
+        if (aliases.some((id) => identities.has(id))) throw new HubError('Selected students have overlapping identities. Resolve the roster before assigning milestones.');
+        aliases.forEach((id) => identities.add(id));
+        const anchorValue = text(row.Anchor_Date) || text(cohort.data()?.PlanAnchor);
+        const anchor = parseActionDate(anchorValue);
+        if (!anchor || serializeDateOnly(anchor) !== anchorValue.slice(0, 10)) throw new HubError(`A valid student or cohort anchor date is required for ${studentIds[index]}.`);
+        return { row, aliases, anchor, fallback: !text(row.Anchor_Date) };
+      });
+      const milestoneData = milestones.map((doc, index) => {
+        const row = doc.data();
+        if (!doc.exists || !row || text(row.milestoneId) !== milestoneIds[index] || !phaseIds.has(text(row.phase))) {
+          throw new HubError('A selected milestone or its active phase changed. Refresh and try again.');
+        }
+        dueTimeValue(row.DueTime);
+        if (!Number.isFinite(Number(row.offsetDays))) throw new HubError('A milestone has an invalid offset.');
+        return row;
+      });
+      const relevantArchives = archiveSnapshot.docs.filter((doc) => {
+        const task = doc.data().task as Doc;
+        return !!task && milestoneIds.includes(actionTemplateId(task)) && identities.has(actionStudentId(task));
+      });
+      const archiveTaskRefs = relevantArchives.map((doc) => {
+        const task = doc.data().task as Doc;
+        const id = text(task.TaskId);
+        if (!id || id.includes('/')) throw new HubError('An archived assignment has an invalid TaskId. Resolve it in Manage milestones.');
+        return this.col(COLLECTIONS.studentActionItems).doc(id);
+      });
+      const archiveTasks = await Promise.all(archiveTaskRefs.map((ref) => transaction.get(ref)));
+      const fingerprint = createHash('sha256').update(JSON.stringify({
+        cohort: cohort.data(), students: memberData.map((item) => item.row),
+        milestones: milestoneData, phases: phases.docs.map((doc) => [doc.id, doc.data()]),
+        tasks: taskGroups.map((docs) => docs.map((doc) => [doc.id, doc.data()]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))),
+        archives: relevantArchives.map((doc, index) => [doc.id, doc.data(), archiveTasks[index].exists, archiveTasks[index].data()]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+        studentIds, milestoneIds, mode,
+      })).digest('hex');
+      if (signature !== undefined && signature !== fingerprint) throw new HubError('Assignments or pathway changed since the preview. Preview again.');
+      const counts = { created: 0, restored: 0, updated: 0, unchanged: 0, fallbackAnchors: memberData.filter((row) => row.fallback).length };
+      const operations: { kind: 'create' | 'restore' | 'update'; task: Doc; ref: FirebaseFirestore.DocumentReference; archive?: FirebaseFirestore.DocumentReference }[] = [];
+      memberData.forEach((member, studentIndex) => {
+        milestoneData.forEach((milestone, milestoneIndex) => {
+          const id = milestoneIds[milestoneIndex];
+          const matching = taskGroups[milestoneIndex].filter((doc) => creatorKind(doc.data() as Doc) === 'System' && actionTemplateId(doc.data() as Doc) === id && member.aliases.includes(actionStudentId(doc.data() as Doc)));
+          if (matching.some((doc) => text(doc.data().cohortId) !== cohortId)) throw new HubError(`An assignment for ${studentIds[studentIndex]} has a missing or different cohort ID. Resolve it before continuing.`);
+          if (matching.length > 1) throw new HubError(`Multiple assignments exist for ${studentIds[studentIndex]} and ${id}. Resolve them before continuing.`);
+          const existing = matching[0];
+          if (existing && text(existing.data().TaskId) !== existing.id) throw new HubError('An assignment TaskId does not match its document ID.');
+          if (existing && mode === 'missing') { counts.unchanged++; return; }
+          const archives = relevantArchives.map((doc, index) => ({ doc, index })).filter(({ doc }) => {
+            const task = doc.data().task as Doc;
+            return actionTemplateId(task) === id && member.aliases.includes(actionStudentId(task));
+          });
+          let restored: typeof archives[number] | undefined;
+          if (!existing && archives.length) {
+            if (archives.length !== 1) throw new HubError(`Multiple archived assignments exist for ${studentIds[studentIndex]} and ${id}. Resolve them in Manage milestones.`);
+            restored = archives[0];
+            const archive = restored.doc.data();
+            const task = archive.task as Doc;
+            if (text(task.cohortId) !== cohortId || creatorKind(task) !== 'System' || !isDeepStrictEqual(archive.milestone, milestone) || archiveTasks[restored.index].exists) {
+              throw new HubError(`An archived assignment for ${studentIds[studentIndex]} and ${id} conflicts with the current pathway or an existing task. Resolve it in Manage milestones.`);
+            }
+          }
+          const original = existing ? existing.data() as Doc : restored ? restored.doc.data().task as Doc : null;
+          const ref = existing ? existing.ref : restored ? archiveTaskRefs[restored.index] : this.col(COLLECTIONS.studentActionItems).doc(shortId('ACT_'));
+          const now = nowIso();
+          const task: Doc = restored && mode === 'missing' ? { ...original } : {
+            ...(original || { TaskId: ref.id, StudentId: studentIds[studentIndex], CreatorType: 'System', TemplateId: id, Status: 'Pending', CreatedBy: actor }),
+            PhaseId: text(milestone.phase), Title: text(milestone.milestoneTitle), Description: text(milestone.milestoneDescription),
+            DueDate: serializeDateOnly(addDays(member.anchor, -Number(milestone.offsetDays || 0))),
+            DueTime: dueTimeValue(milestone.DueTime), cohortId, LastUpdated: now, UpdatedBy: actor,
+          };
+          if (existing && isDeepStrictEqual(
+            [original?.PhaseId, original?.Title, original?.Description, original?.DueDate, original?.DueTime || ''],
+            [task.PhaseId, task.Title, task.Description, task.DueDate, task.DueTime],
+          )) { counts.unchanged++; return; }
+          const kind = existing ? 'update' : restored ? 'restore' : 'create';
+          counts[kind === 'create' ? 'created' : kind === 'restore' ? 'restored' : 'updated']++;
+          operations.push({ kind, task, ref, archive: restored?.doc.ref });
+        });
+      });
+      if (signature !== undefined) {
+        operations.forEach((operation) => {
+          if (operation.kind === 'update') transaction.update(operation.ref, {
+            PhaseId: operation.task.PhaseId, Title: operation.task.Title, Description: operation.task.Description,
+            DueDate: operation.task.DueDate, DueTime: operation.task.DueTime,
+            LastUpdated: operation.task.LastUpdated, UpdatedBy: operation.task.UpdatedBy,
+          });
+          else transaction.create(operation.ref, operation.task);
+          if (operation.archive) transaction.delete(operation.archive);
+        });
+      }
+      return { ...counts, signature: fingerprint };
+    });
   }
 
   async resetCohortPathway(cohortId: string, actor: string, now: string): Promise<{ archived: number; milestones: number; phases: number }> {

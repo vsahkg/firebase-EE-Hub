@@ -1,5 +1,6 @@
 import { adminDialogKind, closeAdminDialog, openAdminDialog } from './records.js';
 import { openMilestoneManagement } from './milestoneManagement.js';
+import { openCohortAssignments } from './cohortAssignments.js';
 import { renderAdmin } from './sections.js';
 import { requestPush } from '../router.js';
 import { callServer, markSync } from '../shared/api.js';
@@ -545,7 +546,7 @@ export function pathwayMarkup() {
     <div class="plan-main">
     ${calendar}
     <section class="plan-block" aria-labelledby="plan-list-heading">
-      <div class="toolbar"><h2 id="plan-list-heading">Milestones</h2><button type="button" class="button" data-plan-action="add-milestone">Add milestone</button>${template ? '' : '<button type="button" class="button secondary" data-plan-action="manage-assignments">Manage milestones</button><button type="button" class="button secondary" data-plan-action="bulk-due-time">Apply due time</button><button type="button" class="button danger" data-plan-action="reset-pathway">Reset cohort milestones</button>'}<button type="button" class="button secondary" data-plan-action="email-notifications">Email notifications</button><span class="muted">${template ? 'Edit the template list here. Hidden phases are left out.' : 'Edit the list here. Hidden phases are left out.'}</span></div>
+      <div class="toolbar"><h2 id="plan-list-heading">Milestones</h2><button type="button" class="button" data-plan-action="add-milestone">Add milestone</button>${template ? '' : '<button type="button" class="button secondary" data-plan-action="assign-milestones">Assign milestones</button><button type="button" class="button secondary" data-plan-action="manage-assignments">Manage milestones</button><button type="button" class="button secondary" data-plan-action="bulk-due-time">Apply due time</button><button type="button" class="button danger" data-plan-action="reset-pathway">Reset cohort milestones</button>'}<button type="button" class="button secondary" data-plan-action="email-notifications">Email notifications</button><span class="muted">${template ? 'Edit the template list here. Hidden phases are left out.' : 'Edit the list here. Hidden phases are left out.'}</span></div>
       ${visible.length ? `<div class="plan-edit-list">${visible.map(pathwayMilestoneMarkup).join('')}</div>` : '<div class="empty">No milestones in the phases that are shown. Show a phase, or add a milestone.</div>'}
     </section>
     </div>
@@ -740,6 +741,14 @@ export function pathwayRunAction(node) {
   else if (action === 'delete-milestone') pathwayDeleteMilestone(node.dataset.milestoneId);
   else if (action === 'bulk-due-time') pathwayBulkDueTime();
   else if (action === 'reset-pathway') pathwayResetCohort();
+  else if (action === 'assign-milestones') {
+    const plan = state.pathwayPlan;
+    if (Object.keys(plan.saving).length || Object.keys(plan.timers).length) {
+      showError(new Error('Wait for pathway changes to finish saving before assigning milestones.'));
+      return;
+    }
+    openCohortAssignments(plan.cohortId, plan.milestones.filter(function(milestone) { return plan.persistedMilestones[milestone.milestoneId] && !milestone.deleting; }));
+  }
   else if (action === 'manage-assignments') {
     const plan = state.pathwayPlan;
     if (Object.keys(plan.saving).length || Object.keys(plan.timers).length) {
