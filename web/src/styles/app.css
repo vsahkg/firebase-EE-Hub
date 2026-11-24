@@ -702,6 +702,8 @@ main.staff-list { max-width: 1480px; }
 .student-list button.name { border: 0; padding: 0; background: none; color: var(--ink); font-weight: 700; font-size: 15px; text-align: left; }
 .student-list button.name:hover, .student-list button.name:focus-visible { text-decoration: underline; }
 .list-student-meta, .list-latest { margin-top: 3px; font-size: 12px; }
+.list-journey { direction: ltr; }
+.list-journey .compact-path, .list-journey .compact-marks, .list-journey .list-phases, .list-journey .ms-row { flex-direction: row; }
 .list-journey.is-expanded { min-width: 440px; }
 .list-journey .compact-path { overflow: visible; }
 .list-journey .compact-phase-body { display: grid; justify-items: center; gap: 6px; width: 100%; padding: 0 6px; }

@@ -222,6 +222,9 @@ export function staffJourneyPhases(home, student) {
     });
   });
   const phases = (home.phases || []).slice();
+  if (phases.every(function(phase) { return Number.isFinite(phase.sequence); })) {
+    phases.sort(function(left, right) { return left.sequence - right.sequence; });
+  }
   const seen = {};
   phases.forEach(function(phase) { seen[phase.phaseId] = true; });
   Object.keys(grouped).forEach(function(phaseId) {
