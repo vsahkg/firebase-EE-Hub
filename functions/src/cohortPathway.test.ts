@@ -10,11 +10,13 @@ import {
   restoreCohortMilestoneAssignment,
   getPathwayPlan,
   saveCohortMilestone,
+  setCohortMilestonesDueTime,
   saveCohortPhase,
   saveCohortPlanAnchor,
   seedCohortPathway,
 } from './cohortPathway';
 import { getStaffHome } from './journey';
+import { dispatch } from './dispatch';
 import { planSweep } from './notificationsPure';
 import { HubUser } from './permissions';
 import { readPhases, readTemplates } from './roster';
@@ -173,6 +175,30 @@ test('a cohort without its own set still reads the template', async () => {
   const templates = await readTemplates(appFor(store, coordinator), '2027');
   assert.deepEqual(phases.map((phase) => phase.phaseId), ['topic', 'research']);
   assert.equal(templates.find((item) => item.milestoneId === 'm1')?.offsetDays, 80);
+});
+
+test('cohort due time dispatch validates access and selections and reports partial progress', async () => {
+  const store = new MemoryStore();
+  await seedTemplate(store);
+  const app = appFor(store, coordinator);
+  await seedCohortPathway(app, '2027', { kind: 'template' }, '2027-12-01');
+  const calls: string[] = [];
+  const fullStore = app.store;
+  fullStore.setCohortMilestoneDueTime = async (_cohort, id, time) => {
+    calls.push(`${id}:${time}`);
+    if (id === 'anchor') throw new Error('simulated batch failure');
+    return 3;
+  };
+  await assert.rejects(setCohortMilestonesDueTime(appFor(store, student), '2027', ['m1'], '10:00'), /Access denied/);
+  await assert.rejects(setCohortMilestonesDueTime(app, '2027', ['m1', 'missing'], '10:00'), /no longer exists/);
+  await assert.rejects(setCohortMilestonesDueTime(app, '2027', ['m1', 'm1'], '10:00'), /more than once/);
+  await assert.rejects(setCohortMilestonesDueTime(app, '2027', ['m1'], '24:00'), /DueTime/);
+  assert.deepEqual(calls, []);
+  await assert.rejects(dispatch(app, 'setCohortMilestonesDueTime', ['2027', ['m1', 'anchor'], '10:00']), /1 of 2 milestones completed.*simulated batch failure/);
+  assert.deepEqual(calls, ['m1:10:00', 'anchor:10:00']);
+  const result = await dispatch(app, 'setCohortMilestonesDueTime', ['2027', ['m1'], '']);
+  assert.deepEqual(result, { milestones: 1, assignments: 3 });
+  assert.deepEqual(calls, ['m1:10:00', 'anchor:10:00', 'm1:']);
 });
 
 test('seeding a cohort copies the template onto a new anchor and leaves the template alone', async () => {

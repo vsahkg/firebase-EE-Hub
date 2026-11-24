@@ -2,7 +2,7 @@ import { canCompleteMilestone, HubUser } from './permissions';
 import { findPlacement, identityAliases, milestoneDocsFor, phaseDocsFor, Placement, readPhases, staffMayAddStudentTodo, staffMayUpdateAllMilestones, staffStudentContext } from './roster';
 import { COLLECTIONS, fieldConfig } from './schema';
 import { App, audited, deny, requireAdmin, requireStaff, requireUser } from './session';
-import { addDays, dateOnlyValue, Doc, HubError, normalizeEmail, nowIso, parseActionDate, serializeDateOnly, shortId, text, toBoolean, uuid, validateEmail } from './util';
+import { addDays, dateOnlyValue, Doc, dueTimeValue, HubError, normalizeEmail, nowIso, parseActionDate, serializeDateOnly, shortId, text, toBoolean, uuid, validateEmail } from './util';
 import { formWritesClosed } from './formsPure';
 import { actionStudentId, actionTemplateId, creatorKind } from './actionIdentifiers';
 
@@ -49,6 +49,7 @@ function newSystemTask(user: HubUser, studentId: string, template: Doc, status: 
     Title: text(template.milestoneTitle),
     Description: text(template.milestoneDescription),
     DueDate: dueDate,
+    DueTime: dueTimeValue(template.DueTime),
     Status: status || 'Pending',
     LastUpdated: nowIso(),
   }, user.email, true);
@@ -83,7 +84,7 @@ export async function getStudentActionItems(app: App, studentEmail: string, user
     item.canEdit = item.CreatorType === 'Student' && user && user.role === 'student' && normalizeEmail(item.StudentId) === user.email;
     const known = item.mOwner === 'supervisor' ? placement : null;
     item.canUpdate = item.canEdit || (item.CreatorType === 'System' && !!user && canCompleteMilestone(user, item.StudentId, item.mOwner, item.templateType, known));
-    item.formOpen = item.templateType !== 'form' || !formWritesClosed(item.DueDate, new Date(), app.timeZone);
+    item.formOpen = item.templateType !== 'form' || !formWritesClosed(item.DueDate, new Date(), app.timeZone, item.DueTime);
     items.push(item);
   }
   return items.sort((left, right) => {
@@ -307,6 +308,7 @@ export async function assignMilestonesToStudents(app: App, cohortId: unknown, se
           Title: text(template.milestoneTitle),
           Description: text(template.milestoneDescription),
           DueDate: dueDate,
+          DueTime: dueTimeValue(template.DueTime),
           Status: 'Pending',
           LastUpdated: now,
           CreatedBy: user.email,
@@ -479,6 +481,7 @@ function assignmentFields(payload: any) {
     description,
     status: requireTaskStatus(input.status),
     dueDate,
+    dueTime: Object.prototype.hasOwnProperty.call(input, 'dueTime') ? dueTimeValue(input.dueTime) : undefined,
     phaseId: text(input.phaseId),
   };
 }
@@ -487,7 +490,8 @@ function massAssignmentFields(payload: any) {
   const input = payload || {};
   const updateStatus = toBoolean(input.updateStatus);
   const updateDate = toBoolean(input.updateDate);
-  if (!updateStatus && !updateDate) throw new HubError('Choose the status, the due date, or both.');
+  const updateTime = toBoolean(input.updateTime);
+  if (!updateStatus && !updateDate && !updateTime) throw new HubError('Choose the status, the due date, or both.');
   const status = updateStatus ? requireTaskStatus(input.status) : '';
   let dueDate = '';
   if (updateDate) {
@@ -495,7 +499,8 @@ function massAssignmentFields(payload: any) {
     if (!parsed) throw new HubError('Due date must be a valid date.');
     dueDate = serializeDateOnly(parsed);
   }
-  return { updateStatus, status, updateDate, dueDate };
+  const dueTime = updateTime ? dueTimeValue(input.dueTime) : '';
+  return { updateStatus, status, updateDate, dueDate, updateTime, dueTime };
 }
 
 async function requireKnownPhase(app: App, phaseId: string, cohortId?: unknown) {
@@ -514,12 +519,13 @@ async function requireMilestoneEditor(app: App, studentEmail: unknown, cohortId:
   return { user, context };
 }
 
-function applyAssignment(item: Doc, changes: { title: string; description: string; status: string; dueDate: string }, phaseId: string, actor: string) {
+function applyAssignment(item: Doc, changes: { title: string; description: string; status: string; dueDate: string; dueTime?: string }, phaseId: string, actor: string) {
   item.Title = changes.title;
   item.Description = changes.description;
   item.PhaseId = phaseId;
   item.Status = changes.status;
   item.DueDate = changes.dueDate;
+  if (changes.dueTime !== undefined) item.DueTime = changes.dueTime;
   item.LastUpdated = nowIso();
   stampActors(item, actor, false);
   return item;
@@ -533,6 +539,7 @@ function assignmentResult(item: Doc) {
     phaseId: text(item.PhaseId),
     status: text(item.Status),
     dueDate: text(item.DueDate),
+    dueTime: text(item.DueTime),
   };
 }
 
@@ -652,8 +659,10 @@ export async function massUpdateMilestones(app: App, cohortId: unknown, studentI
     studentCount: emails.length,
     updateStatus: changes.updateStatus,
     updateDate: changes.updateDate,
+    updateTime: changes.updateTime,
     status: changes.status,
     dueDate: changes.dueDate,
+    dueTime: changes.dueTime,
   }, async () => {
     let updated = 0;
     for (const entry of pending) {
@@ -664,6 +673,7 @@ export async function massUpdateMilestones(app: App, cohortId: unknown, studentI
       }
       if (changes.updateStatus) current.Status = changes.status;
       if (changes.updateDate) current.DueDate = changes.dueDate;
+      if (changes.updateTime) current.DueTime = changes.dueTime;
       current.LastUpdated = nowIso();
       stampActors(current, user.email, false);
       await app.store.set(COLLECTIONS.studentActionItems, text(current.TaskId), current);
@@ -673,6 +683,7 @@ export async function massUpdateMilestones(app: App, cohortId: unknown, studentI
       for (const email of missing) {
         const due = changes.updateDate ? changes.dueDate : initialDueDate(contexts[email].roster, template, '');
         const created = newSystemTask(user, email, template, changes.updateStatus ? changes.status : 'Pending', due, cohort);
+        if (changes.updateTime) created.DueTime = changes.dueTime;
         await app.store.set(COLLECTIONS.studentActionItems, text(created.TaskId), created);
         updated += 1;
       }
@@ -819,6 +830,7 @@ export async function readActionItemsForEmails(app: App, emails: Record<string, 
       title: text(item.Title),
       status: text(item.Status) || 'Pending',
       due: dateOnlyValue(item.DueDate),
+      dueTime: text(item.DueTime),
     });
   });
   return grouped;

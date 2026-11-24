@@ -16,6 +16,8 @@ class Reference {
 
 class FakeFirestore {
   records = new Map<string, Doc>();
+  transactions = 0;
+  failAt = 0;
   collection(name: string) { return new Reference(name, false); }
   async runTransaction<T>(work: (transaction: {
     get: (ref: Reference) => Promise<{ exists?: boolean; data: () => Doc | undefined; docs: { id: string; ref: Reference; data: () => Doc }[] }>;
@@ -23,6 +25,8 @@ class FakeFirestore {
     create: (ref: Reference, data: Doc) => void;
     delete: (ref: Reference) => void;
   }) => Promise<T>): Promise<T> {
+    this.transactions += 1;
+    if (this.transactions === this.failAt) throw new Error('simulated transaction failure');
     const writes: (() => void)[] = [];
     const result = await work({
       get: async (ref) => {
@@ -40,6 +44,53 @@ class FakeFirestore {
     return result;
   }
 }
+
+test('cohort due time updates every system assignment in batches without changing dates or other cohorts', async () => {
+  const db = new FakeFirestore();
+  const store = new Store(db as unknown as Firestore);
+  const milestonePath = `${COLLECTIONS.cohorts}/2027/milestones/m1`;
+  db.records.set(milestonePath, { milestoneId: 'm1', DueTime: '08:00' });
+  db.records.set(`${COLLECTIONS.cohorts}/2027/members/student@example.edu`, { StudentId: 'student@example.edu' });
+  for (let index = 0; index < 405; index++) {
+    const id = `task-${index}`;
+    db.records.set(`${COLLECTIONS.studentActionItems}/${id}`, { TaskId: id, StudentId: 'student@example.edu', TemplateId: 'm1', CreatorType: 'System', cohortId: '2027', DueDate: '2027-01-01', Status: 'Completed' });
+  }
+  db.records.set(`${COLLECTIONS.studentActionItems}/other`, { TaskId: 'other', StudentId: 'student@example.edu', TemplateId: 'm1', CreatorType: 'System', cohortId: '2026', DueTime: '10:00' });
+  assert.equal(await store.setCohortMilestoneDueTime('2027', 'm1', '16:15', 'admin', 'now'), 405);
+  assert.equal(db.records.get(milestonePath)?.DueTime, '16:15');
+  assert.equal(db.records.get(`${COLLECTIONS.studentActionItems}/task-404`)?.DueTime, '16:15');
+  assert.equal(db.records.get(`${COLLECTIONS.studentActionItems}/task-404`)?.DueDate, '2027-01-01');
+  assert.equal(db.records.get(`${COLLECTIONS.studentActionItems}/task-404`)?.Status, 'Completed');
+  assert.equal(db.records.get(`${COLLECTIONS.studentActionItems}/other`)?.DueTime, '10:00');
+});
+
+test('cohort due time reports confirmed writes when a later batch fails', async () => {
+  const db = new FakeFirestore();
+  const store = new Store(db as unknown as Firestore);
+  db.records.set(`${COLLECTIONS.cohorts}/2027/milestones/m1`, { milestoneId: 'm1' });
+  for (let index = 0; index < 405; index++) {
+    const id = `task-${index}`;
+    db.records.set(`${COLLECTIONS.studentActionItems}/${id}`, { TaskId: id, StudentId: 'student@example.edu', TemplateId: 'm1', CreatorType: 'System', cohortId: '2027' });
+  }
+  db.failAt = 2;
+  await assert.rejects(store.setCohortMilestoneDueTime('2027', 'm1', '16:15', 'admin', 'now'), /400 of 405 assignments. Retry to finish/);
+  assert.equal(db.records.get(`${COLLECTIONS.cohorts}/2027/milestones/m1`)?.DueTime, '16:15');
+  assert.equal([...db.records.entries()].filter(([path, row]) => path.startsWith(`${COLLECTIONS.studentActionItems}/`) && row.DueTime === '16:15').length, 400);
+  db.failAt = 0;
+  assert.equal(await store.setCohortMilestoneDueTime('2027', 'm1', '16:15', 'admin', 'now'), 405);
+  assert.equal([...db.records.entries()].filter(([path, row]) => path.startsWith(`${COLLECTIONS.studentActionItems}/`) && row.DueTime === '16:15').length, 405);
+});
+
+test('ambiguous legacy assignments block due time updates before any writes', async () => {
+  const db = new FakeFirestore();
+  const store = new Store(db as unknown as Firestore);
+  const milestonePath = `${COLLECTIONS.cohorts}/2027/milestones/m1`;
+  db.records.set(milestonePath, { milestoneId: 'm1', DueTime: '08:00' });
+  db.records.set(`${COLLECTIONS.cohorts}/2027/members/student@example.edu`, { StudentId: 'student@example.edu' });
+  db.records.set(`${COLLECTIONS.studentActionItems}/legacy`, { TaskId: 'legacy', StudentId: 'student@example.edu', TemplateId: 'm1', CreatorType: 'System' });
+  await assert.rejects(store.setCohortMilestoneDueTime('2027', 'm1', '16:15', 'admin', 'now'), /legacy assignment/);
+  assert.equal(db.records.get(milestonePath)?.DueTime, '08:00');
+});
 
 test('real store transactions reject stale and invalid previews without partial writes', async () => {
   const db = new FakeFirestore();

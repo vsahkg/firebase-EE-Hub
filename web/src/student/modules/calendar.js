@@ -1,4 +1,4 @@
-import { escapeHtml } from '../../shared/html.js';
+import { escapeHtml, milestoneOwnerTag } from '../../shared/html.js';
 import {
   initialMonthWindow,
   milestoneMarks,
@@ -28,7 +28,8 @@ export function renderMonthHtml(index, marks, todayKey) {
     const date = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
     const items = (marks || []).filter(function(mark) { return mark.date === date; });
     const chips = items.map(function(mark) {
-      return `<span class="ee-ms is-${escapeHtml(mark.status)}" title="${escapeHtml(mark.title)}">${escapeHtml(mark.title)}</span>`;
+      const label = mark.title + (mark.owner ? ' · ' + mark.owner : '') + (mark.dueTime ? ' · ' + mark.dueTime + ' HKT' : '');
+      return `<span class="ee-ms is-${escapeHtml(mark.status)}" title="${escapeHtml(label)}">${escapeHtml(mark.title)} ${milestoneOwnerTag(mark.owner)}${mark.dueTime ? ' · ' + escapeHtml(mark.dueTime) + ' HKT' : ''}</span>`;
     }).join('');
     const classes = ['ee-day'];
     if (date === todayKey) classes.push('is-today');

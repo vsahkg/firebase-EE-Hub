@@ -134,6 +134,7 @@ export async function listFormMilestones(app: App) {
     result.push({
       milestoneId: text(template.milestoneId),
       title: text(template.milestoneTitle),
+      mOwner: text(template.mOwner).toLowerCase(),
       phase: text(template.phase),
       status: record ? text(record.status) : 'Not started',
       version: record ? Number(record.version) || 0 : 0,
@@ -151,6 +152,7 @@ export async function getFormDesigner(app: App, milestoneId: unknown) {
   return {
     milestoneId: text(template.milestoneId),
     title: text(template.milestoneTitle),
+    mOwner: text(template.mOwner).toLowerCase(),
     definition,
     sheetName: `FORM: ${text(template.milestoneId)}`,
     responseCount: responses.length,
@@ -216,7 +218,7 @@ export async function getStudentForm(app: App, milestoneId: unknown) {
   const response = await app.store.get(COLLECTIONS.formResponses, formResponseId(definition.milestoneId, user.email));
   const item = await findSystemActionItem(app, user.email, definition.milestoneId);
   const due = item ? item.DueDate : '';
-  const formOpen = !formWritesClosed(due, new Date(), app.timeZone);
+  const formOpen = !formWritesClosed(due, new Date(), app.timeZone, item?.DueTime);
   const names = await subjectNames(app);
   return {
     milestoneId: definition.milestoneId,
@@ -228,7 +230,7 @@ export async function getStudentForm(app: App, milestoneId: unknown) {
     response: readResponse(response, definition.fields),
     formOpen,
     submitCompletes: definition.submitCompletes !== false,
-    closedMessage: formOpen ? '' : formClosedMessage(due, app.timeZone),
+    closedMessage: formOpen ? '' : formClosedMessage(due, app.timeZone, item?.DueTime),
     student: { displayName: placement?.displayName || user.displayName, subject: placement?.subject || '' },
   };
 }
@@ -257,7 +259,7 @@ export async function saveStudentForm(app: App, milestoneId: unknown, payload: a
     }
     const item = await findSystemActionItem(app, user.email, definition.milestoneId);
     const due = item ? item.DueDate : '';
-    if (formWritesClosed(due, new Date(), app.timeZone)) throw new HubError(formClosedMessage(due, app.timeZone));
+    if (formWritesClosed(due, new Date(), app.timeZone, item?.DueTime)) throw new HubError(formClosedMessage(due, app.timeZone, item?.DueTime));
     const responseId = formResponseId(definition.milestoneId, user.email);
     const current = await app.store.get(COLLECTIONS.formResponses, responseId);
     if (current) {

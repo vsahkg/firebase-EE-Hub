@@ -1,6 +1,6 @@
 import { callServer, markSync } from '../../shared/api.js';
 import { showError } from '../../shared/feedback.js';
-import { escapeHtml, formatActivityWhen, safeUrl } from '../../shared/html.js';
+import { escapeHtml, formatActivityWhen, milestoneDueLabel, milestoneOwnerTag, safeUrl } from '../../shared/html.js';
 import { isStale } from '../../shared/scene.js';
 import { milestoneTitleText, systemItemFor } from '../home.js';
 
@@ -59,11 +59,11 @@ function renderLogged(home, compact) {
   const rows = meetings.map(function(template) {
     const item = systemItemFor(home, template.milestoneId);
     const title = milestoneTitleText(template, item);
-    const due = item && item.DueDate ? String(item.DueDate).slice(0, 10) : '';
+    const due = item ? milestoneDueLabel(item.DueDate, item.DueTime) : '';
     const status = item && item.Status === 'Completed' ? 'Logged' : 'Not logged yet';
     const logged = noteByMilestone[template.milestoneId] || [];
     const body = compact ? '' : logged.map(renderNote).join('') || '<p class="muted">No note yet.</p>';
-    return `<article class="meeting-note"><h3>${escapeHtml(title)}</h3><p class="muted">${escapeHtml(status)}${due ? ' · ' + escapeHtml(due) : ''}</p>${body}</article>`;
+    return `<article class="meeting-note"><h3>${escapeHtml(title)} ${milestoneOwnerTag(template.mOwner)}</h3><p class="muted">${escapeHtml(status)}${due ? ' · ' + escapeHtml(due) : ''}</p>${body}</article>`;
   }).join('');
   const orphans = notes.filter(function(note) {
     return !meetings.some(function(template) { return template.milestoneId === note.milestoneId; });

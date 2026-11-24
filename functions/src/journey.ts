@@ -9,7 +9,7 @@ import { publishedFormIds } from './forms';
 import { listAddedSupervisorTodos, supervisorOwnedMilestones } from './supervisorTodos';
 import { loadReflectionNotes } from './reflectionNotes';
 import { readStudentPageFlags } from './studentPages';
-import { dateOnlyValue, HubError, normalizeEmail, text } from './util';
+import { dateOnlyValue, HubError, milestoneDeadline, normalizeEmail, text } from './util';
 
 function sessionNotesFrom(events: { type: string; taskId: string; milestoneId: string; comment: string; at: string; actor: string }[]) {
   return events
@@ -81,6 +81,7 @@ function summarize(student: any, items: any[], templates: any[], returned: Recor
   let behind = 0;
   let returnedCount = 0;
   let latest = '';
+  let latestOwner = '';
   const waiting: { taskId: string; title: string; templateId: string; type: string }[] = [];
   const segments: string[] = [];
   const dues: string[] = [];
@@ -90,8 +91,9 @@ function summarize(student: any, items: any[], templates: any[], returned: Recor
     const item = byTemplate[template.milestoneId];
     const status = item ? item.status : 'Pending';
     const due = item && item.due ? dueTime(item.due) : NaN;
-    const overdue = status !== 'Completed' && !isNaN(due) && due < today;
-    if (status === 'Completed') { done += 1; latest = template.title; }
+    const deadline = item && item.due && item.dueTime ? milestoneDeadline(item.due, item.dueTime) : null;
+    const overdue = status !== 'Completed' && (deadline ? deadline.getTime() < Date.now() : !isNaN(due) && due < today);
+    if (status === 'Completed') { done += 1; latest = template.title; latestOwner = template.mOwner; }
     else if (priorComplete) currentPhase = template.phase;
     if (overdue) behind += 1;
     const segment = status === 'Completed' ? 'd' : (status === 'In Progress' ? 'p' : (overdue ? 'l' : 'o'));
@@ -125,6 +127,7 @@ function summarize(student: any, items: any[], templates: any[], returned: Recor
     behind,
     phaseId: currentPhase,
     latestTitle: latest,
+    latestOwner,
     segments: segments.join(''),
     dues,
     returned: returnedCount,
@@ -136,6 +139,7 @@ function summarize(student: any, items: any[], templates: any[], returned: Recor
       title: item.title || '',
       status: item.status || 'Pending',
       due: item.due ? String(item.due).slice(0, 10) : '',
+      dueTime: item.dueTime || '',
     })),
   };
 }

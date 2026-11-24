@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { state } from '../shared/state.js';
-import { rememberSupervisorTodoView, supervisorTodoEntries, supervisorTodoList } from './supervisorTodos.js';
+import { rememberSupervisorTodoView, supervisorMilestoneOverdue, supervisorTodoEntries, supervisorTodoList } from './supervisorTodos.js';
 import { supervisorTodoStudentGroups, supervisorTodosByDueDate } from './supervisorTodoViews.js';
 
 const home = {
@@ -22,6 +22,13 @@ const home = {
     { todoId: 'done', title: 'Done item', due: '2020-01-01', status: 'Completed' },
   ],
 };
+
+test('timed supervisor milestones become overdue at their Hong Kong deadline', () => {
+  const now = new Date('2026-11-01T04:30:00Z');
+  assert.equal(supervisorMilestoneOverdue({ due: '2026-11-01', dueTime: '12:29' }, now), true);
+  assert.equal(supervisorMilestoneOverdue({ due: '2026-11-01', dueTime: '12:31' }, now), false);
+  assert.equal(supervisorMilestoneOverdue({ due: '2026-11-01', dueTime: '12:30' }, now), false);
+});
 
 function titles(entries) {
   return entries.map(function(entry) { return entry.title; });
@@ -115,9 +122,10 @@ test('the supervisor list renders grouped students and keeps added to-dos action
   const cara = html.indexOf('>Cara Ng<');
   const liam = html.indexOf('>Liam Park<');
   assert.ok(ben >= 0 && ben < added && added < zoe && zoe < amy && amy < tagged && tagged < cara && cara < liam);
-  const approval = html.indexOf('>Supervisor approval<');
-  const finalMeeting = html.indexOf('>Final meeting<');
+  const approval = html.indexOf('>Supervisor approval ');
+  const finalMeeting = html.indexOf('>Final meeting ');
   assert.ok(zoe < approval && approval < finalMeeting && finalMeeting < amy);
+  assert.match(html, /Supervisor approval <span class="milestone-owner">Supervisor<\/span>/);
   assert.match(html, /data-open-student="ben@school.edu"/);
   assert.match(html, /data-complete-supervisor-todo="file"/);
   assert.equal(html.includes('Done item'), false);

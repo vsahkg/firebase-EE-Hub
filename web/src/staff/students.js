@@ -3,7 +3,7 @@ import { requestPush } from '../router.js';
 import { callServer } from '../shared/api.js';
 import { showError } from '../shared/feedback.js';
 import { rememberHeaderCohorts } from '../shared/headerCohorts.js';
-import { escapeHtml, shortDate, textCompare } from '../shared/html.js';
+import { escapeHtml, milestoneDueLabel, milestoneOwnerTag, textCompare } from '../shared/html.js';
 import { loadingLine } from '../shared/loading.js';
 import { advanceScene, sameScene } from '../shared/scene.js';
 import { hideListJourneyTip } from '../shared/sessionChrome.js';
@@ -175,7 +175,7 @@ export function staffStatusMarkup(student) {
   const chips = [`<span class="chip ${student.behind ? 'bad' : 'ok'}">${student.behind ? student.behind + ' overdue' : 'On track'}</span>`];
   if (student.returned) chips.push('<span class="chip bad">Returned</span>');
   if (student.waiting && student.waiting.length) chips.push(`<span class="chip bad">${student.waiting.length} waiting</span>`);
-  return `<div class="chips">${chips.join('')}</div><div class="muted list-latest">Latest: ${escapeHtml(student.latestTitle || '—')}</div>`;
+  return `<div class="chips">${chips.join('')}</div><div class="muted list-latest">Latest: ${escapeHtml(student.latestTitle || '—')}${student.latestTitle ? ' ' + milestoneOwnerTag(student.latestOwner) : ''}</div>`;
 }
 
 export function listMilestoneStatus(milestone) {
@@ -207,6 +207,8 @@ export function staffJourneyPhases(home, student) {
       id: template.milestoneId,
       title: (assignment && assignment.title) || template.title || template.milestoneId,
       type: template.type || '',
+      owner: template.mOwner,
+      dueTime: assignment && assignment.dueTime || '',
       due: assignment && assignment.due ? String(assignment.due).slice(0, 10) : (dues[index] ? String(dues[index]).slice(0, 10) : ''),
       done: segment === 'd',
       here: index === currentIndex
@@ -214,7 +216,7 @@ export function staffJourneyPhases(home, student) {
   });
   Object.keys(grouped).forEach(function(phaseId) {
     grouped[phaseId].sort(function(left, right) {
-      const due = dueSortKey(left.due).localeCompare(dueSortKey(right.due));
+      const due = dueSortKey(left.due, left.dueTime).localeCompare(dueSortKey(right.due, right.dueTime));
       if (due) return due;
       return textCompare(left.title, right.title);
     });
@@ -249,8 +251,8 @@ export function renderListJourney(home, student) {
   const summary = (student.done || 0) + ' of ' + (student.total || 0) + ' milestones done. ' + phases.map(function(phase) {
     if (!phase.milestones.length) return phase.title + ', no milestones';
     const bits = phase.milestones.map(function(milestone) {
-      const when = milestone.due ? shortDate(milestone.due) : '';
-      return milestone.title + (when ? ', ' + when : '') + ', ' + listMilestoneStatus(milestone);
+      const when = milestoneDueLabel(milestone.due, milestone.dueTime);
+      return milestone.title + (milestone.owner ? ', owner: ' + milestone.owner : '') + (when ? ', ' + when : '') + ', ' + listMilestoneStatus(milestone);
     }).join('; ');
     return phase.title + (phase.here ? ' (current phase)' : '') + ': ' + bits;
   }).join('. ');
@@ -258,8 +260,8 @@ export function renderListJourney(home, student) {
     const compact = `<ol class="compact-path">${phases.map(function(phase) {
       const dots = phase.milestones.map(function(milestone) {
         const stateClass = milestone.done ? 'done' : (milestone.here ? 'here' : '');
-        const when = milestone.due ? shortDate(milestone.due) : '';
-        const tip = milestone.title + (when ? ' · ' + when : '') + ' · ' + listMilestoneStatus(milestone);
+        const when = milestoneDueLabel(milestone.due, milestone.dueTime);
+        const tip = milestone.title + (milestone.owner ? ' · ' + milestone.owner : '') + (when ? ' · ' + when : '') + ' · ' + listMilestoneStatus(milestone);
         return `<i class="cmark ${stateClass}" data-tip="${escapeHtml(tip)}"></i>`;
       }).join('');
       return `<li class="compact-phase${phase.complete ? ' done' : ''}${phase.here ? ' here' : ''}"><div class="compact-phase-body"><span class="compact-marks">${dots}</span><span class="compact-label">${escapeHtml(phase.title)}</span></div></li>`;
@@ -275,14 +277,42 @@ export function renderListJourney(home, student) {
       return `<li class="phase-card ${card.className}" style="${style}"><span class="phase-title" data-tip="${escapeHtml(phaseTip)}">${escapeHtml((phase.index + 1) + ' · ' + phase.title)}</span><p class="phase-range"></p><p class="muted list-phase-empty">No milestones</p></li>`;
     }
     const marks = phase.milestones.map(function(milestone) {
-      const when = milestone.due ? shortDate(milestone.due) : '';
-      const tip = milestone.title + (when ? ' · ' + when : '') + ' · ' + listMilestoneStatus(milestone);
-      return `<li><span class="list-mark" data-tip="${escapeHtml(tip)}"><span class="ms-date">${escapeHtml(journeyDayLabel(milestone.due))}</span><span class="ms-mark-wrap">${milestoneMark(milestone)}</span><span class="ms-label">${escapeHtml(milestone.title)}</span></span></li>`;
+      const when = milestoneDueLabel(milestone.due, milestone.dueTime);
+      const tip = milestone.title + (milestone.owner ? ' · ' + milestone.owner : '') + (when ? ' · ' + when : '') + ' · ' + listMilestoneStatus(milestone);
+      return `<li><span class="list-mark" data-tip="${escapeHtml(tip)}"><span class="ms-date">${escapeHtml(journeyDayLabel(milestone.due))}${milestone.dueTime ? ' ' + escapeHtml(milestone.dueTime) : ''}</span><span class="ms-mark-wrap">${milestoneMark(milestone)}</span><span class="ms-label">${escapeHtml(milestone.title)} ${milestoneOwnerTag(milestone.owner)}</span></span></li>`;
     }).join('');
     const filledStyle = (card.style ? card.style + ';' : '') + '--span:' + Math.max(phase.milestones.length, 1);
     return `<li class="phase-card ${card.className}${phase.here ? ' here' : ''}${phase.complete ? ' done' : ''}" style="${filledStyle}"><span class="phase-title" data-tip="${escapeHtml(phaseTip)}">${escapeHtml((phase.index + 1) + ' · ' + phase.title)}</span><p class="phase-range">${escapeHtml(range)}</p><div class="phase-body"><div class="phase-line" aria-hidden="true"></div><ol class="ms-row">${marks}</ol></div></li>`;
   }).join('');
   return `<div class="list-journey is-expanded" role="img" aria-label="${escapeHtml(summary)}"><ol class="list-phases">${cards}</ol></div>`;
+}
+
+export function renderCohortJourney(home, students) {
+  const phases = {};
+  (home.phases || []).forEach(function(phase) { phases[phase.phaseId] = phase.phaseTitle || phase.phaseId; });
+  const entries = (home.templates || []).map(function(template) {
+    const groups = new Map();
+    students.forEach(function(student) {
+      const assignment = (student.assigned || []).find(function(item) { return item.templateId === template.milestoneId; });
+      const date = assignment && assignment.due || '';
+      const time = date && assignment && assignment.dueTime || '';
+      const key = assignment ? (date ? date + (time ? ' ' + time : '') : 'undated') : 'unassigned';
+      if (!groups.has(key)) groups.set(key, { date, time, unassigned: !assignment, students: [] });
+      groups.get(key).students.push(student.displayName || student.email);
+    });
+    const grouped = Array.from(groups.values()).sort(function(a, b) {
+      return (a.date ? a.date + ' ' + a.time : '9999').localeCompare(b.date ? b.date + ' ' + b.time : '9999');
+    });
+    const dates = grouped.map(function(group) {
+      const label = group.unassigned ? 'Not assigned' : milestoneDueLabel(group.date, group.time) || 'No due date';
+      return `<details><summary>${escapeHtml(label)} · ${group.students.length} student${group.students.length === 1 ? '' : 's'}</summary><ul>${group.students.map(function(name) { return `<li>${escapeHtml(name)}</li>`; }).join('')}</ul></details>`;
+    }).join('');
+    const summaryDates = grouped.map(function(group) {
+      return (group.unassigned ? 'Not assigned' : milestoneDueLabel(group.date, group.time) || 'No due date') + ' (' + group.students.length + ')';
+    }).join(', ');
+    return `<details class="cohort-journey-milestone"><summary>${escapeHtml(template.title || template.milestoneId)} ${milestoneOwnerTag(template.mOwner)}<span class="muted"> ${escapeHtml(summaryDates)}</span></summary><p class="muted">${escapeHtml(phases[template.phase] || template.phase || '')}</p>${template.description ? `<p>${escapeHtml(template.description)}</p>` : ''}${dates || '<p class="muted">No students in this view.</p>'}</details>`;
+  }).join('');
+  return entries || '<p class="muted">No milestones in this cohort.</p>';
 }
 
 export function staffPickMarkup(student) {
@@ -296,7 +326,7 @@ export function renderStaffStudentTiles(students, phaseName, canEdit) {
         <div class="muted">${escapeHtml(student.subject || 'No subject yet')}${student.hrm ? ' · ' + escapeHtml(student.hrm) : ''}${student.surname ? ' · ' + escapeHtml(student.surname) : ''}</div>
         <div class="segs" aria-label="${student.done} of ${student.total} milestones">${student.segments.split('').map(function(segment) { return `<i class="${segment === 'o' ? '' : segment}"></i>`; }).join('')}</div>
         <div class="chips"><span class="chip">${escapeHtml(phaseName[student.phaseId] || student.phaseId || 'Phase')}</span><span class="chip ${student.behind ? 'bad' : 'ok'}">${student.behind ? student.behind + ' overdue' : 'On track'}</span>${student.waiting.length ? `<span class="chip bad">${student.waiting.length} waiting</span>` : ''}${student.returned ? `<span class="chip bad">Returned</span>` : ''}</div>
-        <div class="muted">Latest: ${escapeHtml(student.latestTitle || '—')}</div></article>`;
+        <div class="muted">Latest: ${escapeHtml(student.latestTitle || '—')}${student.latestTitle ? ' ' + milestoneOwnerTag(student.latestOwner) : ''}</div></article>`;
   }).join('')}</div>`;
 }
 
@@ -403,6 +433,7 @@ export function paintStaffCards(home) {
       <label><input type="checkbox" id="staff-mine" ${state.staffMine ? 'checked' : ''}> My students</label>
       <input id="staff-search" type="search" placeholder="Search students" value="${escapeHtml(state.staffQuery)}" aria-label="Search students">
       <span class="muted">${students.length}${students.length === total ? '' : ' of ' + total} students</span>
+      <button type="button" class="button secondary" id="open-cohort-journey">Journey</button>
       <button type="button" class="button secondary" id="open-email-desk">Email reminders</button>
       ${mayManageSupervisorTodos(state.user) ? '<button type="button" class="button secondary" id="open-supervisor-todos">Supervisor to-dos</button>' : ''}
       ${canEditMilestones ? `<label><input type="checkbox" class="student-pick" id="staff-select-visible" ${allVisibleSelected ? 'checked' : ''} ${students.length ? '' : 'disabled'} aria-label="Select all students in this list"> Select all</label><span class="muted" id="staff-selected-count">${state.staffSelected.length} selected</span><button type="button" class="button secondary" id="edit-milestones" ${state.staffSelected.length ? '' : 'disabled'}>Edit Milestones</button>` : ''}
@@ -411,8 +442,20 @@ export function paintStaffCards(home) {
     <div class="staff-board${home.viewAs === 'supervisor' ? '' : ' solo'}">
     ${supervisorTodoList(home)}
     ${students.length ? (mode === 'tiles' ? renderStaffStudentTiles(students, phaseName, canEditMilestones) : renderStaffStudentList(home, students)) : '<div class="empty">No students match this view.</div>'}
-    </div>`;
+    </div>
+    <aside class="cohort-journey-drawer" id="cohort-journey-drawer" aria-label="Cohort Journey" hidden>
+      <div class="journey-panel-bar"><strong>Journey</strong><button type="button" id="close-cohort-journey">Close</button></div>
+      <div class="journey-scroll"><p class="muted">Milestones for the ${students.length} students in this view.</p>${renderCohortJourney(home, students)}</div>
+    </aside>`;
   bindUnreadNotices(main, true);
+  const journeyDrawer = document.getElementById('cohort-journey-drawer');
+  const journeyOpen = document.getElementById('open-cohort-journey');
+  const journeyClose = document.getElementById('close-cohort-journey');
+  journeyOpen.addEventListener('click', function() { journeyDrawer.hidden = false; journeyClose.focus(); });
+  journeyClose.addEventListener('click', function() { journeyDrawer.hidden = true; journeyOpen.focus(); });
+  journeyDrawer.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') { journeyDrawer.hidden = true; journeyOpen.focus(); }
+  });
   document.getElementById('open-email-desk').addEventListener('click', function() {
     state.emailDesk = true;
     state.supervisorDesk = false;

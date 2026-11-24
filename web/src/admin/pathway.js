@@ -3,8 +3,8 @@ import { openMilestoneManagement } from './milestoneManagement.js';
 import { renderAdmin } from './sections.js';
 import { requestPush } from '../router.js';
 import { callServer, markSync } from '../shared/api.js';
-import { showError } from '../shared/feedback.js';
-import { cssEscape, escapeHtml, hexColour, toBoolean } from '../shared/html.js';
+import { showError, showSuccess } from '../shared/feedback.js';
+import { cssEscape, escapeHtml, hexColour, milestoneOwnerTag, toBoolean } from '../shared/html.js';
 import { loadingLine } from '../shared/loading.js';
 import { isStale } from '../shared/scene.js';
 import { syncHeaderCohortSelect } from '../shared/staffContext.js';
@@ -188,6 +188,7 @@ export function pathwayNormalizeMilestone(record) {
     milestoneDescription: String(record.milestoneDescription || ''),
     phase: String(record.phase || ''),
     mOwner: String(record.mOwner || 'student').toLowerCase(),
+    DueTime: String(record.DueTime || ''),
     isAnchor: record.isAnchor === undefined || record.isAnchor === null || record.isAnchor === '' ? null : toBoolean(record.isAnchor),
     deleting: !!record.deleting
   };
@@ -214,7 +215,8 @@ export function pathwayMilestonePayload(milestone) {
     offsetDays: pathwayOffset(milestone.offsetDays),
     milestoneDescription: String(milestone.milestoneDescription || ''),
     phase: String(milestone.phase || ''),
-    mOwner: String(milestone.mOwner || 'student').toLowerCase()
+    mOwner: String(milestone.mOwner || 'student').toLowerCase(),
+    DueTime: String(milestone.DueTime || '')
   };
   if (milestone.isAnchor === true || milestone.isAnchor === false) payload.isAnchor = milestone.isAnchor;
   return payload;
@@ -543,7 +545,7 @@ export function pathwayMarkup() {
     <div class="plan-main">
     ${calendar}
     <section class="plan-block" aria-labelledby="plan-list-heading">
-      <div class="toolbar"><h2 id="plan-list-heading">Milestones</h2><button type="button" class="button" data-plan-action="add-milestone">Add milestone</button>${template ? '' : '<button type="button" class="button secondary" data-plan-action="manage-assignments">Manage milestones</button>'}<button type="button" class="button secondary" data-plan-action="email-notifications">Email notifications</button><span class="muted">${template ? 'Edit the template list here. Hidden phases are left out.' : 'Edit the list here. Hidden phases are left out.'}</span></div>
+      <div class="toolbar"><h2 id="plan-list-heading">Milestones</h2><button type="button" class="button" data-plan-action="add-milestone">Add milestone</button>${template ? '' : '<button type="button" class="button secondary" data-plan-action="manage-assignments">Manage milestones</button><button type="button" class="button secondary" data-plan-action="bulk-due-time">Apply due time</button>'}<button type="button" class="button secondary" data-plan-action="email-notifications">Email notifications</button><span class="muted">${template ? 'Edit the template list here. Hidden phases are left out.' : 'Edit the list here. Hidden phases are left out.'}</span></div>
       ${visible.length ? `<div class="plan-edit-list">${visible.map(pathwayMilestoneMarkup).join('')}</div>` : '<div class="empty">No milestones in the phases that are shown. Show a phase, or add a milestone.</div>'}
     </section>
     </div>
@@ -646,7 +648,7 @@ export function pathwayChipMarkup(milestone) {
   const anchor = pathwayIsAnchor(milestone);
   const selected = state.pathwayPlan.selectedMilestoneId === milestone.milestoneId;
   const label = (milestone.milestoneTitle || 'Untitled') + ' · ' + pathwayOffsetLabel(milestone.offsetDays);
-  return `<button type="button" class="plan-chip plan-sync${anchor ? ' is-anchor' : ''}${selected ? ' is-selected' : ''}${pathwaySyncClass('milestone', milestone.milestoneId)}" draggable="${milestone.deleting ? 'false' : 'true'}" data-chip-id="${escapeHtml(milestone.milestoneId)}" data-sync-key="milestone:${escapeHtml(milestone.milestoneId)}" style="--phase:${color}" title="${escapeHtml(label)}"><span class="plan-chip-title">${escapeHtml(milestone.milestoneTitle || 'Untitled')}</span></button>`;
+  return `<button type="button" class="plan-chip plan-sync${anchor ? ' is-anchor' : ''}${selected ? ' is-selected' : ''}${pathwaySyncClass('milestone', milestone.milestoneId)}" draggable="${milestone.deleting ? 'false' : 'true'}" data-chip-id="${escapeHtml(milestone.milestoneId)}" data-sync-key="milestone:${escapeHtml(milestone.milestoneId)}" style="--phase:${color}" title="${escapeHtml(label)}"><span class="plan-chip-title">${escapeHtml(milestone.milestoneTitle || 'Untitled')}</span> ${milestoneOwnerTag(milestone.mOwner)}</button>`;
 }
 
 export function pathwayDetailsIcon(open) {
@@ -665,8 +667,9 @@ export function pathwayMilestoneMarkup(milestone) {
     <div class="plan-edit-main">
       <span class="plan-swatch" style="--phase:${color}"></span>
       <div class="plan-edit-fields">
-        <div class="field"><label>Title</label><input ${locked} data-focus="milestone:${id}:title" data-milestone-id="${id}" data-milestone-field="milestoneTitle" value="${escapeHtml(milestone.milestoneTitle)}"></div>
+        <div class="field"><label>Title ${milestoneOwnerTag(milestone.mOwner)}</label><input ${locked} data-focus="milestone:${id}:title" data-milestone-id="${id}" data-milestone-field="milestoneTitle" value="${escapeHtml(milestone.milestoneTitle)}"></div>
         ${state.pathwayPlan.mode === 'template' ? '' : `<div class="field"><label>Date</label><input ${locked} type="date" data-focus="milestone:${id}:due" data-milestone-id="${id}" data-milestone-field="due" value="${escapeHtml(pathwayMilestoneIso(milestone))}"></div>`}
+        <div class="field"><label>Due time (Hong Kong)</label><input ${locked} type="time" data-focus="milestone:${id}:time" data-milestone-id="${id}" data-milestone-field="DueTime" value="${escapeHtml(milestone.DueTime || '')}"></div>
         <div class="field"><label>Days before anchor</label><input ${locked} type="number" data-focus="milestone:${id}:offset" data-milestone-id="${id}" data-milestone-field="offsetDays" value="${escapeHtml(milestone.offsetDays)}"></div>
       </div>
       <button type="button" class="plan-icon-button" data-plan-action="toggle-milestone" data-milestone-id="${id}" data-focus="milestone:${id}:details" aria-expanded="${open ? 'true' : 'false'}" aria-label="${open ? 'Hide milestone details' : 'Edit milestone details'}">${pathwayDetailsIcon(open)}</button>
@@ -735,6 +738,7 @@ export function pathwayRunAction(node) {
   else if (action === 'release-anchor') pathwayReleaseAnchor(node.dataset.milestoneId);
   else if (action === 'phase-colour') pathwaySetPhaseColour(node.dataset.phaseId, node.dataset.colour);
   else if (action === 'delete-milestone') pathwayDeleteMilestone(node.dataset.milestoneId);
+  else if (action === 'bulk-due-time') pathwayBulkDueTime();
   else if (action === 'manage-assignments') {
     const plan = state.pathwayPlan;
     if (Object.keys(plan.saving).length || Object.keys(plan.timers).length) {
@@ -759,6 +763,60 @@ export function pathwayRunAction(node) {
   else if (action === 'seed') pathwaySeed();
   else if (action === 'email-notifications') openEmailNotifications('');
   else if (action === 'email-milestone') openEmailNotifications(node.dataset.milestoneId);
+}
+
+export function pathwayBulkDueTime() {
+  const plan = state.pathwayPlan;
+  if (Object.keys(plan.saving).length || Object.keys(plan.timers).length) {
+    showError(new Error('Wait for pathway changes to finish saving before applying due times.'));
+    return;
+  }
+  const milestones = plan.milestones.filter(function(milestone) { return plan.persistedMilestones[milestone.milestoneId] && !milestone.deleting; });
+  if (!milestones.length) {
+    showError(new Error('Save at least one milestone first.'));
+    return;
+  }
+  const scope = pathwayScopeNow();
+  openAdminDialog('pathway-due-time', `<div class="form-panel" role="dialog" aria-modal="true" aria-labelledby="bulk-due-time-title"><div class="toolbar"><h2 id="bulk-due-time-title">Apply due time</h2><button type="button" class="button secondary" data-close-admin-dialog>Close</button></div>
+    <p>This changes the cohort defaults and all existing cohort assignments for the selected milestones, including former students. Dates and statuses are unchanged. Leave the time blank to remove it.</p>
+    <form id="bulk-due-time-form"><div class="field"><label for="bulk-due-time">Due time (Hong Kong)</label><input id="bulk-due-time" type="time"></div>
+      <label class="check-option"><input id="bulk-due-time-all" type="checkbox"> Select all milestones</label>
+      <div>${milestones.map(function(milestone) {
+        return `<label class="check-option"><input type="checkbox" name="milestone" value="${escapeHtml(milestone.milestoneId)}"> ${escapeHtml(milestone.milestoneTitle || milestone.milestoneId)} ${milestoneOwnerTag(milestone.mOwner)}</label>`;
+      }).join('')}</div>
+      <p class="notice error" id="bulk-due-time-error" hidden></p>
+      <div class="toolbar"><button class="button" type="submit">Apply</button><button class="button secondary" type="button" data-close-admin-dialog>Cancel</button></div>
+    </form></div>`);
+  const form = document.getElementById('bulk-due-time-form');
+  if (!form) return;
+  form.querySelector('#bulk-due-time-all').addEventListener('change', function(event) {
+    form.querySelectorAll('input[name="milestone"]').forEach(function(box) { box.checked = event.target.checked; });
+  });
+  form.addEventListener('submit', function(event) {
+    event.preventDefault();
+    const ids = Array.from(form.querySelectorAll('input[name="milestone"]:checked')).map(function(box) { return box.value; });
+    const errorNode = form.querySelector('#bulk-due-time-error');
+    if (!ids.length) { errorNode.hidden = false; errorNode.textContent = 'Select at least one milestone.'; return; }
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    callServer('setCohortMilestonesDueTime', scope.cohortId, ids, form.querySelector('#bulk-due-time').value).then(function(result) {
+      closeAdminDialog();
+      if (result.auditWarning) showError(new Error('Due times were updated, but the completion audit entry could not be written.'));
+      else showSuccess('Updated ' + result.milestones + ' milestones and ' + result.assignments + ' assignments.');
+      if (pathwayScopeCurrent(scope)) {
+        state.pathwayPlan.loaded = false;
+        renderPathwayPlanner(document.getElementById('admin-content'));
+      }
+    }).catch(function(error) {
+      if (isStale(error)) return;
+      closeAdminDialog();
+      showError(error);
+      if (pathwayScopeCurrent(scope)) {
+        state.pathwayPlan.loaded = false;
+        renderPathwayPlanner(document.getElementById('admin-content'));
+      }
+    });
+  });
 }
 
 export function openEmailNotifications(milestoneId) {
@@ -806,7 +864,7 @@ export function pathwaySeed() {
 
 export function pathwayOnInput(event) {
   const input = event.target;
-  if (!input || input.tagName === 'SELECT' || input.type === 'date' || input.type === 'color') return;
+  if (!input || input.tagName === 'SELECT' || input.type === 'date' || input.type === 'time' || input.type === 'color') return;
   if (input.dataset && input.dataset.phaseField) pathwayUpdatePhaseField(input);
   if (input.dataset && input.dataset.milestoneField) pathwayUpdateMilestoneField(input);
 }
@@ -818,7 +876,7 @@ export function pathwayOnChange(event) {
     pathwaySetAnchorDate(input.value);
     return;
   }
-  if (input.tagName !== 'SELECT' && input.type !== 'date' && input.type !== 'color') return;
+  if (input.tagName !== 'SELECT' && input.type !== 'date' && input.type !== 'time' && input.type !== 'color') return;
   if (input.dataset && input.dataset.phaseField) pathwayUpdatePhaseField(input);
   if (input.dataset && input.dataset.milestoneField) pathwayUpdateMilestoneField(input);
 }

@@ -1,6 +1,6 @@
 import { callServer, runMutation } from '../shared/api.js';
 import { showError } from '../shared/feedback.js';
-import { escapeHtml, shortDate, textCompare } from '../shared/html.js';
+import { escapeHtml, milestoneDueLabel, milestoneOwnerTag, shortDate, textCompare } from '../shared/html.js';
 import { loadingLine } from '../shared/loading.js';
 import { isStale } from '../shared/scene.js';
 import { syncHeaderCohortSelect } from '../shared/staffContext.js';
@@ -16,11 +16,16 @@ function dueKey(due) {
   return due ? String(due).slice(0, 10) : '9999-99-99';
 }
 
-function todayStamp() {
-  const now = new Date();
+function todayStamp(now) {
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
   return now.getFullYear() + '-' + month + '-' + day;
+}
+
+export function supervisorMilestoneOverdue(entry, now = new Date()) {
+  if (!entry.due) return false;
+  if (entry.dueTime) return Date.parse(entry.due + 'T' + entry.dueTime + ':00+08:00') < now.getTime();
+  return entry.due < todayStamp(now);
 }
 
 export function supervisorTodoEntries(home) {
@@ -31,6 +36,7 @@ export function supervisorTodoEntries(home) {
       studentName: item.studentName || item.studentEmail,
       title: item.title || '',
       due: item.due || '',
+      dueTime: item.dueTime || '',
       next: !!item.next,
     };
   });
@@ -82,12 +88,12 @@ export function rememberSupervisorTodoView(view) {
 function todoEntryHtml(entry, mode, options) {
   const grouped = !!(options && options.grouped);
   if (entry.kind === 'milestone') {
-    const when = entry.due ? shortDate(entry.due) : '';
-    const overdue = !!(entry.due && entry.due < todayStamp());
-    const detail = (grouped ? [when, overdue ? 'Overdue' : ''] : [entry.title, when, overdue ? 'Overdue' : '']).filter(Boolean).join(' · ');
+    const when = milestoneDueLabel(entry.due, entry.dueTime);
+    const overdue = supervisorMilestoneOverdue(entry);
+    const detail = [when, overdue ? 'Overdue' : ''].filter(Boolean).join(' · ');
     const flag = entry.next ? '<span class="todo-flag">Next</span>' : '';
     const heading = grouped ? (entry.title || 'Milestone') : entry.studentName;
-    return `<li><button type="button" class="todo-open${entry.next ? ' is-next' : ''}${overdue ? ' is-overdue' : ''}" data-open-student="${escapeHtml(entry.studentEmail)}"><strong>${escapeHtml(heading)}</strong>${detail ? `<span>${escapeHtml(detail)}</span>` : ''}${flag}</button></li>`;
+    return `<li><button type="button" class="todo-open${entry.next ? ' is-next' : ''}${overdue ? ' is-overdue' : ''}" data-open-student="${escapeHtml(entry.studentEmail)}"><strong>${escapeHtml(heading)}${grouped ? ' ' + milestoneOwnerTag('supervisor') : ''}</strong>${!grouped ? `<span>${escapeHtml(entry.title)} ${milestoneOwnerTag('supervisor')}</span>` : ''}${detail ? `<span>${escapeHtml(detail)}</span>` : ''}${flag}</button></li>`;
   }
   const when = entry.due ? shortDate(entry.due) : '';
   const bits = [entry.note, when].filter(Boolean).join(' · ');

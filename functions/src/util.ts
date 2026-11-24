@@ -109,6 +109,23 @@ export function dateOnlyValue(value: unknown): string {
   return parsed ? serializeDateOnly(parsed) : '';
 }
 
+export function dueTimeValue(value: unknown): string {
+  const raw = text(value);
+  if (!raw) return '';
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(raw)) throw new HubError('DueTime must be a valid time in HH:mm format.');
+  return raw;
+}
+
+export function milestoneDeadline(date: unknown, time: unknown): Date | null {
+  const due = dateOnlyValue(date);
+  const dueTime = dueTimeValue(time);
+  if (!due || !dueTime) return null;
+  const parsed = parseActionDate(due);
+  if (!parsed || serializeDateOnly(parsed) !== due) throw new HubError('DueDate must be a valid date.');
+  const [hours, minutes] = dueTime.split(':').map(Number);
+  return new Date(parsed.getTime() + (hours * 60 + minutes - 8 * 60) * 60000);
+}
+
 export function cleanDoc(data: Doc): Doc {
   const out: Doc = {};
   Object.keys(data).forEach((key) => {

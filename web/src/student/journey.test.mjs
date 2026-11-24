@@ -4,8 +4,10 @@ import { state } from '../shared/state.js';
 import {
   bindJourneyDisclosures,
   journeyHereCard,
+  journeyOverview,
   paintStudentJourney,
   renderJourneyMilestone,
+  renderJourneyPhase,
   renderJourneyTodo,
 } from './journey.js';
 
@@ -27,6 +29,26 @@ test('milestone and to-do headers start collapsed and retain their controls in d
   const current = journeyHereCard(home, { template, item }, { p1: 'Research' }, 'all', 'p1');
   assert.match(current, /data-journey-toggle="milestone:m1" aria-expanded="false"/);
   assert.match(current, /data-journey-details hidden[\s\S]*Review the question/);
+});
+
+test('student owner filter hides other milestone owners in both journey views', () => {
+  state.journeyExpanded = {};
+  state.journeyFilters = { phaseId: 'all', showSystem: true, showStudent: true, owner: 'student' };
+  const studentTemplate = { ...template, milestoneId: 'm2', title: 'Write', mOwner: 'student' };
+  const record = { ...home, templates: [template, studentTemplate] };
+  assert.deepEqual(journeyOverview(record)[0].milestones.map((entry) => entry.id), ['m2']);
+  const html = renderJourneyPhase(record, record.phases[0], {}, null, 'all', 'p1');
+  assert.match(html, /Write/);
+  assert.doesNotMatch(html, />Review</);
+  assert.match(html, /milestone-owner">Student/);
+  state.journeyFilters.owner = 'all';
+  assert.equal(journeyOverview(record)[0].milestones.length, 2);
+});
+
+test('milestone due time is shown when present', () => {
+  state.journeyExpanded = {};
+  assert.match(renderJourneyMilestone(home, template, { ...item, DueDate: '2027-01-02', DueTime: '15:30' }, null), /2 Jan 2027 · 15:30 HKT/);
+  assert.doesNotMatch(renderJourneyMilestone(home, template, { ...item, DueDate: '2027-01-02' }, null), /HKT/);
 });
 
 test('disclosures toggle independently and synchronize both copies of a milestone', () => {

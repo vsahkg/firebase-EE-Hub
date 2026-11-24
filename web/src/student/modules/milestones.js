@@ -1,4 +1,4 @@
-import { escapeHtml } from '../../shared/html.js';
+import { escapeHtml, milestoneDueLabel, milestoneOwnerTag } from '../../shared/html.js';
 import { bindFormButtons } from '../milestones.js';
 import {
   formButton,
@@ -41,7 +41,7 @@ function renderCompact(home) {
     return item.CreatorType === 'System' && item.Status === 'Completed';
   }).length;
   const hero = next
-    ? `<section class="hero"><div><p class="eyebrow">${home.staffView ? 'Next step' : 'Your next step'}</p><h2>${escapeHtml(milestoneTitleText(next.template, next.item))}</h2><p>${escapeHtml(milestoneDescriptionText(next.template, next.item) || 'Complete this milestone before the due date.')}</p></div><div>${next.item && next.item.DueDate ? `<div class="chip">${escapeHtml(String(next.item.DueDate).slice(0, 10))}</div>` : ''}${formButton(home, next)}</div></section>`
+    ? `<section class="hero"><div><p class="eyebrow">${home.staffView ? 'Next step' : 'Your next step'}</p><h2>${escapeHtml(milestoneTitleText(next.template, next.item))} ${milestoneOwnerTag(next.template.mOwner)}</h2><p>${escapeHtml(milestoneDescriptionText(next.template, next.item) || 'Complete this milestone before the due date.')}</p></div><div>${next.item && next.item.DueDate ? `<div class="chip">${escapeHtml(milestoneDueLabel(next.item.DueDate, next.item.DueTime))}</div>` : ''}${formButton(home, next)}</div></section>`
     : '<section class="hero"><div><p class="eyebrow">All caught up</p><h2>No action needed right now</h2><p>Open Journey to see what is coming.</p></div></section>';
   return `<h2>Milestones</h2>${hero}<div class="tiles"><div class="tile"><div class="muted">Done</div><div class="val">${done} <small>/ ${templates.length}</small></div></div></div>`;
 }

@@ -1,6 +1,6 @@
 import { callServer, markSync, runMutation } from '../shared/api.js';
 import { showError, showSuccess } from '../shared/feedback.js';
-import { escapeHtml, hexColour, shortDate, textCompare } from '../shared/html.js';
+import { escapeHtml, hexColour, milestoneDueLabel, milestoneOwnerTag, shortDate, textCompare } from '../shared/html.js';
 import { state } from '../shared/state.js';
 import {
   milestoneDescriptionText,
@@ -19,7 +19,7 @@ export function journeyOverview(home) {
   const currentId = current && current.template ? current.template.milestoneId : '';
   return (home.phases || []).map(function(phase, index) {
     const milestones = (home.templates || []).filter(function(template) {
-      return milestonePhaseId(template, systemItemFor(home, template.milestoneId)) === phase.phaseId;
+      return milestoneOwnerVisible(template) && milestonePhaseId(template, systemItemFor(home, template.milestoneId)) === phase.phaseId;
     }).map(function(template) {
       const item = systemItemFor(home, template.milestoneId);
       const done = !!(item && item.Status === 'Completed');
@@ -27,12 +27,14 @@ export function journeyOverview(home) {
         id: template.milestoneId,
         title: milestoneTitleText(template, item),
         type: template.type || '',
+        owner: template.mOwner,
+        dueTime: item && item.DueTime || '',
         due: item && item.DueDate ? String(item.DueDate).slice(0, 10) : '',
         done: done,
         here: template.milestoneId === currentId && !done
       };
     }).sort(function(left, right) {
-      const due = dueSortKey(left.due).localeCompare(dueSortKey(right.due));
+      const due = dueSortKey(left.due, left.dueTime).localeCompare(dueSortKey(right.due, right.dueTime));
       if (due) return due;
       return textCompare(left.title, right.title);
     });
@@ -48,6 +50,10 @@ export function journeyOverview(home) {
       complete: milestones.length > 0 && doneCount === milestones.length
     };
   });
+}
+
+export function milestoneOwnerVisible(template) {
+  return state.journeyFilters.owner !== 'student' || String(template.mOwner || '').toLowerCase() === 'student';
 }
 
 export function phaseRangeLabel(dates) {
@@ -94,9 +100,9 @@ export function renderJourneyHero(phases) {
     const range = phaseRangeLabel(phase.milestones.map(function(milestone) { return milestone.due; }));
     const marks = phase.milestones.length ? phase.milestones.map(function(milestone) {
       const status = milestone.done ? 'Done' : (milestone.here ? 'Current step' : 'Not done yet');
-      const when = milestone.due ? shortDate(milestone.due) : '';
-      const label = milestone.title + (when ? ', ' + when : '') + ', ' + status + '. Show this phase on the journey.';
-      return `<li><button type="button" class="ms-hit" data-open-phase="${escapeHtml(phase.id)}" aria-label="${escapeHtml(label)}"><span class="ms-date">${escapeHtml(journeyDayLabel(milestone.due))}</span><span class="ms-mark-wrap">${milestoneMark(milestone)}</span><span class="ms-label">${escapeHtml(milestone.title)}</span></button></li>`;
+      const when = milestoneDueLabel(milestone.due, milestone.dueTime);
+      const label = milestone.title + (milestone.owner ? ', owner: ' + milestone.owner : '') + (when ? ', ' + when : '') + ', ' + status + '. Show this phase on the journey.';
+      return `<li><button type="button" class="ms-hit" data-open-phase="${escapeHtml(phase.id)}" aria-label="${escapeHtml(label)}"><span class="ms-date">${escapeHtml(journeyDayLabel(milestone.due))}${milestone.dueTime ? ' ' + escapeHtml(milestone.dueTime) : ''}</span><span class="ms-mark-wrap">${milestoneMark(milestone)}</span><span class="ms-label">${escapeHtml(milestone.title)} ${milestoneOwnerTag(milestone.owner)}</span></button></li>`;
     }).join('') : '<li class="muted">No milestones</li>';
     const card = phaseCardAttrs(phase);
     const style = (card.style ? card.style + ';' : '') + '--span:' + Math.max(phase.milestones.length, 1);
@@ -105,7 +111,7 @@ export function renderJourneyHero(phases) {
   const compact = phases.length ? `<ol class="compact-path">${phases.map(function(phase) {
     const dots = phase.milestones.map(function(milestone) {
       const stateClass = milestone.done ? 'done' : (milestone.here ? 'here' : '');
-      return `<i class="cmark ${stateClass}" title="${escapeHtml(milestone.title + (milestone.done ? ' · Done' : (milestone.here ? ' · Current' : '')))}"></i>`;
+      return `<i class="cmark ${stateClass}" title="${escapeHtml(milestone.title + (milestone.owner ? ' · ' + milestone.owner : '') + (milestone.due ? ' · ' + milestoneDueLabel(milestone.due, milestone.dueTime) : '') + (milestone.done ? ' · Done' : (milestone.here ? ' · Current' : '')))}"></i>`;
     }).join('');
     const summary = phase.title + ', ' + phase.doneCount + ' of ' + phase.milestones.length + ' done. Show this phase on the journey.';
     return `<li class="compact-phase${phase.complete ? ' done' : ''}${phase.here ? ' here' : ''}"><button type="button" data-open-phase="${escapeHtml(phase.id)}" aria-label="${escapeHtml(summary)}"><span class="compact-marks">${dots}</span><span class="compact-label">${escapeHtml(phase.title)}</span></button></li>`;
@@ -193,8 +199,9 @@ export function paintStudentJourney(home, host) {
       <button type="button" data-zoom="all" aria-pressed="${zoom === 'all' ? 'true' : 'false'}">Whole journey</button>
       <button type="button" data-layer="milestones" aria-pressed="${state.journeyFilters.showSystem ? 'true' : 'false'}">Milestones</button>
       <button type="button" data-layer="todos" aria-pressed="${state.journeyFilters.showStudent ? 'true' : 'false'}">To-dos</button>
+      <label for="journey-owner">Milestone owner</label><select id="journey-owner"><option value="all"${state.journeyFilters.owner !== 'student' ? ' selected' : ''}>All owners</option><option value="student"${state.journeyFilters.owner === 'student' ? ' selected' : ''}>Student only</option></select>
     </div>
-    ${journeyHereCard(home, current, phaseTitle, zoom, currentPhaseId)}
+    ${current && !milestoneOwnerVisible(current.template) ? '' : journeyHereCard(home, current, phaseTitle, zoom, currentPhaseId)}
     ${visiblePhases.length ? visiblePhases.map(function(phase) {
       return renderJourneyPhase(home, phase, phaseTitle, current, zoom, currentPhaseId);
     }).join('') : '<div class="empty">Official milestones appear after your cohort is assigned.</div>'}
@@ -213,14 +220,14 @@ export function journeyHereCard(home, current, phaseTitle, zoom, currentPhaseId)
   const shownTitle = milestoneTitleText(current.template, item);
   const shownPhase = milestonePhaseId(current.template, item);
   const title = phaseTitle[shownPhase] || shownPhase;
-  const due = item && item.DueDate ? shortDate(item.DueDate) : '';
+  const due = item ? milestoneDueLabel(item.DueDate, item.DueTime) : '';
   const canCheck = milestoneWritable(home, item);
   const actions = journeyActions(item, current.template, home);
   const check = journeyCheck(item, 'Mark ' + shownTitle + ' done', canCheck, current.template.milestoneId);
   const edit = milestoneEditButton(home, item, shownTitle, current.template);
   const key = 'milestone:' + current.template.milestoneId;
   const expanded = !!state.journeyExpanded[key];
-  return `<section class="here-card" data-journey-disclosure data-task-id="${item ? escapeHtml(item.TaskId) : ''}" data-milestone-id="${escapeHtml(current.template.milestoneId || '')}"><p class="eyebrow">You are here · ${escapeHtml(title)}</p><div class="step-top">${check}<h2 class="journey-step-heading"><button type="button" class="journey-step-toggle" data-journey-toggle="${escapeHtml(key)}" aria-expanded="${expanded}"><span class="journey-step-title">${escapeHtml(shownTitle)}</span><span class="journey-step-chevron" aria-hidden="true"></span></button></h2></div><div data-journey-details${expanded ? '' : ' hidden'}><p>${escapeHtml(milestoneDescriptionText(current.template, item) || 'This is your next step.')}</p><div class="step-actions">${due ? `<span class="chip">${escapeHtml(due)}</span>` : ''}${actions || `<span class="chip">${escapeHtml(milestoneStatusText(home, item, current.template))}</span>`}${edit}</div></div></section>`;
+  return `<section class="here-card" data-journey-disclosure data-task-id="${item ? escapeHtml(item.TaskId) : ''}" data-milestone-id="${escapeHtml(current.template.milestoneId || '')}"><p class="eyebrow">You are here · ${escapeHtml(title)}</p><div class="step-top">${check}<h2 class="journey-step-heading"><button type="button" class="journey-step-toggle" data-journey-toggle="${escapeHtml(key)}" aria-expanded="${expanded}"><span class="journey-step-title">${escapeHtml(shownTitle)} ${milestoneOwnerTag(current.template.mOwner)}${due ? ' · ' + escapeHtml(due) : ''}</span><span class="journey-step-chevron" aria-hidden="true"></span></button></h2></div><div data-journey-details${expanded ? '' : ' hidden'}><p>${escapeHtml(milestoneDescriptionText(current.template, item) || 'This is your next step.')}</p><div class="step-actions">${actions || `<span class="chip">${escapeHtml(milestoneStatusText(home, item, current.template))}</span>`}${edit}</div></div></section>`;
 }
 
 export function renderJourneyPhase(home, phase, phaseTitle, current, zoom, currentPhaseId) {
@@ -233,10 +240,11 @@ export function renderJourneyPhase(home, phase, phaseTitle, current, zoom, curre
   const showMilestones = state.journeyFilters.showSystem;
   const showTodos = state.journeyFilters.showStudent;
   const rows = [];
-  if (showMilestones) milestones.forEach(function(template) {
+  if (showMilestones) milestones.filter(milestoneOwnerVisible).forEach(function(template) {
     const item = (home.actionItems || []).filter(function(entry) { return entry.CreatorType === 'System' && entry.TemplateId === template.milestoneId; })[0] || null;
     rows.push({
       due: item && item.DueDate,
+      dueTime: item && item.DueTime,
       title: template.title,
       html: renderJourneyMilestone(home, template, item, current)
     });
@@ -245,7 +253,7 @@ export function renderJourneyPhase(home, phase, phaseTitle, current, zoom, curre
     rows.push({ due: item.DueDate, title: item.Title, html: renderJourneyTodo(item) });
   });
   rows.sort(function(left, right) {
-    const due = dueSortKey(left.due).localeCompare(dueSortKey(right.due));
+    const due = dueSortKey(left.due, left.dueTime).localeCompare(dueSortKey(right.due, right.dueTime));
     if (due) return due;
     return textCompare(left.title, right.title);
   });
@@ -256,9 +264,9 @@ export function renderJourneyPhase(home, phase, phaseTitle, current, zoom, curre
   return `<section class="journey-phase ${phase.phaseId === currentPhaseId ? 'here' : ''}"><header><h2>${escapeHtml(phase.phaseTitle || phase.phaseId)}</h2><span class="muted">${done} of ${milestones.length}</span></header>${composer}<ol class="steps-rail">${rows.length ? rows.map(function(row) { return row.html; }).join('') : '<li class="muted">Nothing in this view.</li>'}</ol></section>`;
 }
 
-export function dueSortKey(value) {
+export function dueSortKey(value, time) {
   const text = String(value || '').slice(0, 10);
-  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '9999-99-99';
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text + ' ' + (time || '24:00') : '9999-99-99';
 }
 
 export function milestoneWritable(home, item) {
@@ -277,13 +285,13 @@ export function renderJourneyMilestone(home, template, item, current) {
   const status = item ? item.Status : 'Pending';
   const isHere = current && current.template.milestoneId === template.milestoneId && status !== 'Completed';
   const canAct = milestoneWritable(home, item);
-  const due = item && item.DueDate ? shortDate(item.DueDate) : '';
+  const due = item ? milestoneDueLabel(item.DueDate, item.DueTime) : '';
   const closed = template.type === 'form' && item && item.formOpen === false ? ' · Form closed' : '';
   const check = journeyCheck(item, 'Mark ' + title + ' done', canAct, template.milestoneId);
   const edit = milestoneEditButton(home, item, title, template);
   const key = 'milestone:' + template.milestoneId;
   const expanded = !!state.journeyExpanded[key];
-  return `<li class="step ${status === 'Completed' ? 'done' : ''} ${isHere ? 'here' : ''}" data-journey-disclosure data-task-id="${item ? escapeHtml(item.TaskId) : ''}" data-milestone-id="${escapeHtml(template.milestoneId || '')}" data-creator-type="System">${check}<div><h3 class="journey-step-heading"><button type="button" class="journey-step-toggle" data-journey-toggle="${escapeHtml(key)}" aria-expanded="${expanded}"><span class="journey-step-title">${escapeHtml(title)}</span><span class="muted">${escapeHtml(milestoneKind(template))}${due ? ' · ' + escapeHtml(due) : ''}${closed}</span><span class="journey-step-chevron" aria-hidden="true"></span></button></h3><div data-journey-details${expanded ? '' : ' hidden'}><p class="muted">${escapeHtml(milestoneDescriptionText(template, item))}</p>${item && item.returnedComment ? `<p class="notice">Returned: ${escapeHtml(item.returnedComment)}</p>` : ''}<div class="step-actions"><span class="muted">${escapeHtml(milestoneStatusText(home, item, template))}</span>${canAct ? journeyActions(item, template, home) : ''}${edit}</div></div></div></li>`;
+  return `<li class="step ${status === 'Completed' ? 'done' : ''} ${isHere ? 'here' : ''}" data-journey-disclosure data-task-id="${item ? escapeHtml(item.TaskId) : ''}" data-milestone-id="${escapeHtml(template.milestoneId || '')}" data-creator-type="System">${check}<div><h3 class="journey-step-heading"><button type="button" class="journey-step-toggle" data-journey-toggle="${escapeHtml(key)}" aria-expanded="${expanded}"><span class="journey-step-title">${escapeHtml(title)} ${milestoneOwnerTag(template.mOwner)}</span><span class="muted">${escapeHtml(milestoneKind(template))}${due ? ' · ' + escapeHtml(due) : ''}${closed}</span><span class="journey-step-chevron" aria-hidden="true"></span></button></h3><div data-journey-details${expanded ? '' : ' hidden'}><p class="muted">${escapeHtml(milestoneDescriptionText(template, item))}</p>${item && item.returnedComment ? `<p class="notice">Returned: ${escapeHtml(item.returnedComment)}</p>` : ''}<div class="step-actions"><span class="muted">${escapeHtml(milestoneStatusText(home, item, template))}</span>${canAct ? journeyActions(item, template, home) : ''}${edit}</div></div></div></li>`;
 }
 
 export function renderJourneyTodo(item) {
@@ -356,6 +364,19 @@ export function bindJourney(main, home, currentPhaseId) {
   function paintHere(record) {
     paintStudentJourney(record, main);
   }
+  const ownerFilter = main.querySelector('#journey-owner');
+  if (ownerFilter) ownerFilter.addEventListener('change', function() {
+    state.journeyFilters.owner = ownerFilter.value;
+    const hero = main.parentElement && main.parentElement.querySelector('.journey-hero');
+    if (hero) {
+      hero.outerHTML = renderJourneyHero(journeyOverview(home));
+      applyJourneyHero(main.parentElement);
+      bindJourneyHero(main.parentElement);
+    }
+    paintHere(home);
+    const next = main.querySelector('#journey-owner');
+    if (next) next.focus();
+  });
   main.querySelectorAll('[data-zoom]').forEach(function(button) {
     button.addEventListener('click', function() {
       const next = button.dataset.zoom;

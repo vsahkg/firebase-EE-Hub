@@ -182,6 +182,8 @@ export function milestoneMarks(home) {
     marks.push({
       id: template.milestoneId,
       date: due,
+      dueTime: item && item.DueTime || '',
+      owner: template.mOwner || '',
       title: (item && item.Title) || template.title || template.milestoneId || 'Milestone',
       phase: phaseIndex >= 0 ? phaseIndex + 1 : 0,
       status: done ? 'done' : (template.milestoneId === nextId ? 'current' : 'upcoming'),

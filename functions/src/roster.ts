@@ -303,6 +303,7 @@ export async function readTemplates(app: App, cohortId?: unknown) {
       phase: text(template.phase),
       mOwner: text(template.mOwner).toLowerCase(),
       offsetDays: Number(template.offsetDays) || 0,
+      DueTime: text(template.DueTime),
       description: text(template.milestoneDescription),
       position: Number(template.position) || 0,
     }))

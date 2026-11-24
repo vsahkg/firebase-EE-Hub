@@ -1,6 +1,6 @@
 import { quietServer } from '../shared/api.js';
 import { docChipMarkup, paintDocChips } from '../shared/docChip.js';
-import { escapeHtml, shortDate } from '../shared/html.js';
+import { escapeHtml, milestoneDueLabel, milestoneOwnerTag } from '../shared/html.js';
 import { loadingLine } from '../shared/loading.js';
 import { advanceScene, sameScene } from '../shared/scene.js';
 import { state } from '../shared/state.js';
@@ -118,10 +118,10 @@ function nextMilestoneHtml(home) {
   }
   const title = milestoneTitleText(next.template, next.item);
   const phase = phaseLabel(home, next);
-  const due = next.item && next.item.DueDate ? shortDate(next.item.DueDate) : '';
+  const due = next.item ? milestoneDueLabel(next.item.DueDate, next.item.DueTime) : '';
   const detail = milestoneDescriptionText(next.template, next.item) || 'This is your next step.';
   const box = dateBox(next.item && next.item.DueDate);
-  return `<section class="ee-next" aria-label="Next journey milestone">${box}<div><p class="eyebrow">Next milestone${phase ? ' · ' + escapeHtml(phase) : ''}</p><h2>${escapeHtml(title)}</h2><p>${escapeHtml(detail)}</p>${due ? `<p>Due ${escapeHtml(due)}</p>` : ''}</div><button type="button" class="button secondary" data-open-ee-page="1">View journey</button></section>`;
+  return `<section class="ee-next" aria-label="Next journey milestone">${box}<div><p class="eyebrow">Next milestone${phase ? ' · ' + escapeHtml(phase) : ''}</p><h2>${escapeHtml(title)} ${milestoneOwnerTag(next.template.mOwner)}</h2><p>${escapeHtml(detail)}</p>${due ? `<p>Due ${escapeHtml(due)}</p>` : ''}</div><button type="button" class="button secondary" data-open-ee-page="1">View journey</button></section>`;
 }
 
 function phaseLabel(home, next) {

@@ -77,6 +77,7 @@ export interface SweepSummary {
     studentName: string;
     studentId: string;
     milestoneTitle: string;
+    mOwner: string;
     recipients: string[];
     subject: string;
     timing: string;
@@ -509,6 +510,7 @@ function summaryFrom(plan: SweepPlan, dryRun: boolean, statuses: Map<string, { s
       studentName: send.studentName,
       studentId: send.studentId,
       milestoneTitle: send.milestoneTitle,
+      mOwner: send.mOwner,
       recipients: send.recipients,
       subject: send.subject,
       timing: timingLabel(send.when, send.days),
@@ -751,6 +753,7 @@ export async function previewNotificationRule(app: App, ruleKind: unknown, ruleI
     kind: rule.kind,
     cohortId: rule.cohortId,
     milestoneTitle: template?.title || rule.milestoneId,
+    mOwner: template?.mOwner || '',
     timing: timingLabel(rule.when, rule.days),
     audience: audienceLabel(rule.audience, template?.mOwner || ''),
     enabled: rule.enabled,

@@ -1,7 +1,7 @@
 import { callServer, runMutation } from '../shared/api.js';
 import { showError, showSuccess } from '../shared/feedback.js';
 import { closeForm, openFormShell } from '../shared/forms.js';
-import { escapeHtml } from '../shared/html.js';
+import { escapeHtml, milestoneOwnerLabel } from '../shared/html.js';
 import { loadingLine } from '../shared/loading.js';
 import { state } from '../shared/state.js';
 
@@ -12,7 +12,7 @@ export function renderFormDesigner(target) {
     const current = forms.some(function(form) { return form.milestoneId === state.formMilestoneId; }) ? state.formMilestoneId : forms[0].milestoneId;
     state.formMilestoneId = current;
     target.innerHTML = `<div class="toolbar"><label for="form-milestone">Milestone</label><select id="form-milestone">${forms.map(function(form) {
-      return `<option value="${escapeHtml(form.milestoneId)}" ${form.milestoneId === current ? 'selected' : ''}>${escapeHtml(form.title)} · ${escapeHtml(form.status)}</option>`;
+      return `<option value="${escapeHtml(form.milestoneId)}" ${form.milestoneId === current ? 'selected' : ''}>${escapeHtml(form.title)} · ${escapeHtml(milestoneOwnerLabel(form.mOwner))} · ${escapeHtml(form.status)}</option>`;
     }).join('')}</select></div><div id="form-designer">${loadingLine('Loading design...')}</div>`;
     document.getElementById('form-milestone').addEventListener('change', function(event) {
       state.formMilestoneId = event.target.value;
@@ -44,7 +44,7 @@ export function paintFormDesigner(design) {
     payload.fields.forEach(function(field) {
       if (field.optionsFrom === 'subjects') field.options = design.subjectNames || [];
     });
-    openFormShell(design.title + ' preview', payload.html, payload.js, { fields: payload.fields, values: {}, student: { displayName: 'Preview student', subject: '' }, onSubmit: function() { closeForm(); showSuccess('Preview only. Nothing was saved.'); return Promise.resolve(); } });
+    openFormShell(design.title + ' · ' + milestoneOwnerLabel(design.mOwner) + ' preview', payload.html, payload.js, { fields: payload.fields, values: {}, student: { displayName: 'Preview student', subject: '' }, onSubmit: function() { closeForm(); showSuccess('Preview only. Nothing was saved.'); return Promise.resolve(); } });
   });
 }
 

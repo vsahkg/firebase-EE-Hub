@@ -415,6 +415,11 @@ export function mergeStaffBooking(existing: Doc | null, incoming: Doc): Doc {
   return { ...incoming, bookingLink: link };
 }
 
+function keepDueTime(existing: Doc | null, incoming: Doc): Doc {
+  if (Object.prototype.hasOwnProperty.call(incoming, 'DueTime') || !existing || existing.DueTime === undefined) return incoming;
+  return { ...incoming, DueTime: existing.DueTime };
+}
+
 async function keepCohortPlan(app: App, cohortId: string, data: Doc): Promise<Doc> {
   const existing = await app.store.get(COLLECTIONS.cohorts, cohortId);
   if (!existing) return data;
@@ -491,7 +496,9 @@ async function writeIngest(app: App, plan: SheetImportPlan, entities: string[], 
           ? keepPublishedSubject(doc.data, await app.store.get(collection, doc.id))
           : id === 'staffUsers'
             ? mergeStaffBooking(await app.store.get(collection, doc.id), doc.data)
-            : doc.data;
+            : id === 'milestoneTemplates' || id === 'studentActionItems'
+              ? keepDueTime(await app.store.get(collection, doc.id), doc.data)
+              : doc.data;
       await app.store.set(collection, doc.id, data);
     }
     for (const existing of await app.store.list(collection)) {

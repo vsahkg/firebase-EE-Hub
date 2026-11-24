@@ -65,6 +65,53 @@ export class Store {
     return (await this.milestoneActionDocuments(milestoneId)).map((doc) => doc.data() as Doc);
   }
 
+  async setCohortMilestoneDueTime(cohortId: string, milestoneId: string, dueTime: string, actor: string, now: string): Promise<number> {
+    const first = await this.db.runTransaction(async (transaction) => {
+      const milestoneRef = this.cohortMilestones(cohortId).doc(milestoneId);
+      const [milestone, members, tasks] = await Promise.all([
+        transaction.get(milestoneRef),
+        transaction.get(this.members(cohortId)),
+        this.milestoneActionDocuments(milestoneId, transaction),
+      ]);
+      if (!milestone.exists) throw new HubError('Milestone not found. Refresh and try again.');
+      const scope = milestoneAssignmentScope(tasks.map((doc) => doc.data() as Doc), members.docs.map((doc) => doc.data() as Doc), cohortId, milestoneId);
+      if (scope.excluded.some((row) => row.reason === 'legacy' && row.creator === 'System')) {
+        throw new HubError('A legacy assignment has no cohort ID. Resolve its ownership before changing due times.');
+      }
+      const ids = scope.assignments.filter((row) => row.creator === 'System').map((row) => row.taskId);
+      const byId = new Map(tasks.map((doc) => [doc.id, doc]));
+      ids.forEach((id) => {
+        const doc = byId.get(id);
+        if (!doc || text(doc.data().TaskId) !== id) throw new HubError('An action item TaskId does not match its document ID.');
+      });
+      transaction.update(milestoneRef, { DueTime: dueTime });
+      ids.slice(0, 400).forEach((id) => transaction.update(byId.get(id)!.ref, { DueTime: dueTime, LastUpdated: now, UpdatedBy: actor }));
+      return ids;
+    });
+    let updated = Math.min(first.length, 400);
+    try {
+      for (let start = 400; start < first.length; start += 400) {
+        const ids = first.slice(start, start + 400);
+        await this.db.runTransaction(async (transaction) => {
+          const refs = ids.map((id) => this.col(COLLECTIONS.studentActionItems).doc(id));
+          const docs = await Promise.all(refs.map((ref) => transaction.get(ref)));
+          docs.forEach((doc, index) => {
+            const row = doc.data();
+            if (!doc.exists || !row || text(row.TaskId) !== ids[index] || text(row.cohortId) !== cohortId
+              || actionTemplateId(row) !== milestoneId || creatorKind(row) !== 'System') {
+              throw new HubError('An assignment changed while the due time was being applied.');
+            }
+          });
+          refs.forEach((ref) => transaction.update(ref, { DueTime: dueTime, LastUpdated: now, UpdatedBy: actor }));
+        });
+        updated += ids.length;
+      }
+    } catch (error) {
+      throw new HubError(`Due time was applied to the milestone and ${updated} of ${first.length} assignments. Retry to finish. ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return updated;
+  }
+
   async manageCohortMilestoneAssignments(cohortId: string, milestoneId: string, signature: string, action: 'reset' | 'delete' | 'archive', actor: string, now: string, selectedIds?: string[]): Promise<number> {
     return this.db.runTransaction(async (transaction) => {
       const [milestone, members, tasks] = await Promise.all([

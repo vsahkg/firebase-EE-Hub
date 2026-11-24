@@ -92,6 +92,43 @@ test('sheet tab titles omit characters Google Sheets rejects', () => {
   assert.equal(sheetTabTitle('FORM: m1'), 'FORM m1');
 });
 
+test('milestone and student-task due times round trip through Sheets, including serial times and older tabs', async () => {
+  const app = appFor();
+  await seed(app);
+  const template = await app.store.get(COLLECTIONS.milestoneTemplates, 'm1');
+  await app.store.set(COLLECTIONS.milestoneTemplates, 'm1', { ...template, DueTime: '15:30' });
+  await app.store.set(COLLECTIONS.studentActionItems, 'task1', {
+    TaskId: 'task1', cohortId: '2026', StudentId: STUDENT, CreatorType: 'System', TemplateId: 'm1',
+    Title: 'Subject preference', DueDate: '2026-10-06', DueTime: '09:00', Status: 'Pending', LastUpdated: '2026-10-01T00:00:00Z',
+  });
+  const grids = await buildExportGrids(app, ['milestoneTemplates', 'studentActionItems']);
+  const milestones = grids.find((grid) => grid.title === 'MILESTONE_TEMPLATES')!;
+  const tasks = grids.find((grid) => grid.title === 'STUDENT_ACTION_ITEMS')!;
+  const templateTime = milestones.rows[0].indexOf('DueTime');
+  const taskTime = tasks.rows[0].indexOf('DueTime');
+  assert.equal(milestones.rows[1][templateTime], '15:30');
+  assert.equal(tasks.rows[1][taskTime], '09:00');
+  milestones.rows[1][templateTime] = 0.5;
+  tasks.rows[1][taskTime] = 0;
+  await applySheetIngest(app, SHEET, ['milestoneTemplates', 'studentActionItems'], true, { workbook: workbook(grids) });
+  assert.equal((await app.store.get(COLLECTIONS.milestoneTemplates, 'm1'))?.DueTime, '12:00');
+  assert.equal((await app.store.get(COLLECTIONS.studentActionItems, 'task1'))?.DueTime, '00:00');
+  milestones.rows.forEach((row) => row.splice(templateTime, 1));
+  tasks.rows.forEach((row) => row.splice(taskTime, 1));
+  await applySheetIngest(app, SHEET, ['milestoneTemplates', 'studentActionItems'], true, { workbook: workbook(grids) });
+  assert.equal((await app.store.get(COLLECTIONS.milestoneTemplates, 'm1'))?.DueTime, '12:00');
+  assert.equal((await app.store.get(COLLECTIONS.studentActionItems, 'task1'))?.DueTime, '00:00');
+});
+
+test('invalid due times in Sheets are rejected before ingest', async () => {
+  const app = appFor();
+  await seed(app);
+  const grids = await buildExportGrids(app, ['milestoneTemplates']);
+  const milestones = grids[0];
+  milestones.rows[1][milestones.rows[0].indexOf('DueTime')] = '25:00';
+  await assert.rejects(applySheetIngest(app, SHEET, ['milestoneTemplates'], true, { workbook: workbook(grids) }), /DueTime/);
+});
+
 test('an admin can export milestones and ingest the edited sheet', async () => {
   const app = appFor();
   await seed(app);

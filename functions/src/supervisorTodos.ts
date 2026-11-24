@@ -14,6 +14,7 @@ export interface SupervisorMilestoneTodo {
   milestoneId: string;
   taskId: string;
   due: string;
+  dueTime: string;
   next: boolean;
 }
 
@@ -48,6 +49,7 @@ interface MilestoneItemRef {
   title?: string;
   status?: string;
   due?: string;
+  dueTime?: string;
 }
 
 const TODO_STATUSES = ['Pending', 'Completed'];
@@ -88,6 +90,7 @@ export function supervisorOwnedMilestones(
         milestoneId: template.milestoneId,
         taskId: text(item && item.taskId),
         due: item && item.due ? String(item.due).slice(0, 10) : '',
+        dueTime: text(item && item.dueTime),
         next,
       });
     });

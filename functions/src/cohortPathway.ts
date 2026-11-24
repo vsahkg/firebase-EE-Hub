@@ -3,7 +3,7 @@ import { validatePhasePrerequisites } from './phaseRules';
 import { milestoneDocsFor, phaseDocsFor, requireCohort } from './roster';
 import { COLLECTIONS, normalizePhaseColor, validateRecordFields } from './schema';
 import { App, audited, requireAdmin } from './session';
-import { addDays, Doc, HubError, nowIso, parseActionDate, serializeDateOnly, text, toBoolean } from './util';
+import { addDays, Doc, dueTimeValue, HubError, nowIso, parseActionDate, serializeDateOnly, text, toBoolean } from './util';
 import { milestoneAssignmentScope } from './milestoneManagement';
 
 const PLAN_ANCHOR = 'PlanAnchor';
@@ -183,6 +183,32 @@ export async function saveCohortMilestone(app: App, cohortId: unknown, record: D
     await app.store.setCohortMilestone(id, values.milestoneId, current ? { ...current, ...values } : values);
     if (toBoolean(values.isAnchor)) await releaseOtherCohortAnchors(app, id, values.milestoneId);
     return { key: values.milestoneId };
+  });
+}
+
+export async function setCohortMilestonesDueTime(app: App, cohortId: unknown, milestoneIds: unknown, value: unknown) {
+  const user = await requireAdmin(app, 'SET_COHORT_MILESTONES_DUE_TIME');
+  const cohort = await requireSeededCohort(app, cohortId);
+  const dueTime = dueTimeValue(value);
+  if (!Array.isArray(milestoneIds) || !milestoneIds.length || milestoneIds.some((id) => typeof id !== 'string' || !text(id) || text(id).includes('/'))) {
+    throw new HubError('Select one or more valid milestones.');
+  }
+  const ids = milestoneIds.map(text);
+  if (new Set(ids).size !== ids.length) throw new HubError('A milestone was selected more than once.');
+  const known = new Set((await app.store.listCohortMilestones(cohort)).map((row) => text(row.milestoneId)));
+  if (ids.some((id) => !known.has(id))) throw new HubError('A selected milestone no longer exists. Refresh and try again.');
+  return audited(app, user, 'SET_COHORT_MILESTONES_DUE_TIME', { cohortId: cohort, milestoneIds: ids, dueTime }, async () => {
+    let completed = 0;
+    let assignments = 0;
+    for (const id of ids) {
+      try {
+        assignments += await app.store.setCohortMilestoneDueTime(cohort, id, dueTime, user.email, nowIso());
+        completed += 1;
+      } catch (error) {
+        throw new HubError(`${completed} of ${ids.length} milestones completed. ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return { milestones: completed, assignments };
   });
 }
 

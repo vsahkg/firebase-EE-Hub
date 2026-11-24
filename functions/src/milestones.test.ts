@@ -102,6 +102,46 @@ async function seed(store: MemoryStore) {
   });
 }
 
+test('staff journey includes the due time for each assignment', async () => {
+  const store = new MemoryStore();
+  await seed(store);
+  const original = await store.get(COLLECTIONS.studentActionItems, 'task-m1-a');
+  await store.set(COLLECTIONS.studentActionItems, 'task-m1-a', { ...original, DueTime: '15:30' });
+  const home = await getStaffHome(appFor(store, coordinatorEmail), '2026', 'coordinator');
+  const student = home.students.find((entry) => entry.email === studentEmail);
+  assert.equal(student?.assigned.find((entry) => entry.templateId === 'm1')?.dueTime, '15:30');
+  assert.equal(student?.assigned.find((entry) => entry.templateId === 'm2')?.dueTime, '');
+});
+
+test('editing and mass updating due times preserves dates and supports clearing', async () => {
+  const store = new MemoryStore();
+  await seed(store);
+  const app = appFor(store, coordinatorEmail);
+  await updateMilestoneAssignment(app, 'task-m1-a', studentEmail, '2026', 'coordinator', {
+    title: 'Subject preference', description: '', phaseId: 'topic', status: 'Pending', dueDate: '2026-10-01', dueTime: '15:30',
+  });
+  assert.equal((await store.get(COLLECTIONS.studentActionItems, 'task-m1-a'))?.DueTime, '15:30');
+  await updateMilestoneAssignment(app, 'task-m1-a', studentEmail, '2026', 'coordinator', {
+    title: 'Subject preference', description: '', phaseId: 'topic', status: 'Pending', dueDate: '2026-10-01',
+  });
+  assert.equal((await store.get(COLLECTIONS.studentActionItems, 'task-m1-a'))?.DueTime, '15:30');
+  await assert.rejects(massUpdateMilestones(app, '2026', [studentEmail], 'm1', { updateTime: true, dueTime: '24:00' }, 'coordinator'), /DueTime/);
+  await massUpdateMilestones(app, '2026', [studentEmail, otherEmail], 'm1', { updateTime: true, dueTime: '09:15' }, 'coordinator');
+  assert.equal((await store.get(COLLECTIONS.studentActionItems, 'task-m1-a'))?.DueDate, '2026-10-01');
+  assert.equal((await store.get(COLLECTIONS.studentActionItems, 'task-m1-b'))?.DueTime, '09:15');
+  await massUpdateMilestones(app, '2026', [studentEmail], 'm1', { updateTime: true, dueTime: '' }, 'coordinator');
+  assert.equal((await store.get(COLLECTIONS.studentActionItems, 'task-m1-a'))?.DueTime, '');
+});
+
+test('a newly created assignment inherits the cohort milestone time', async () => {
+  const store = new MemoryStore();
+  await seed(store);
+  await store.set(COLLECTIONS.milestoneTemplates, 'm2', { ...await store.get(COLLECTIONS.milestoneTemplates, 'm2'), DueTime: '17:00' });
+  await setStaffMilestoneStatus(appFor(store, coordinatorEmail), otherEmail, '2026', 'm2', 'Completed', 'coordinator');
+  const task = (await store.list(COLLECTIONS.studentActionItems)).find((item) => item.StudentId === otherEmail && item.TemplateId === 'm2');
+  assert.equal(task?.DueTime, '17:00');
+});
+
 test('a coordinator can edit the fields of one milestone assignment', async () => {
   const store = new MemoryStore();
   await seed(store);

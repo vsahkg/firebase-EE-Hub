@@ -1,7 +1,7 @@
 import { activeSubjectNamesFrom, ALLOCATION_LIVE_SHEET_KEYS } from './allocationPure';
 
 export { ALLOCATION_LIVE_SHEET_KEYS };
-import { HubError, text, toBoolean } from './util';
+import { dueTimeValue, HubError, text, toBoolean } from './util';
 
 export interface FieldDef {
   name: string;
@@ -52,6 +52,7 @@ export const APP_TABLES: Record<string, TableDef> = {
       { name: 'type', type: 'select', required: true, options: ['form', 'upload', 'doc', 'approval', 'meeting'] },
       { name: 'milestoneTitle', type: 'text', required: true },
       { name: 'offsetDays', type: 'number' },
+      { name: 'DueTime', type: 'time', label: 'Due time (Hong Kong)' },
       { name: 'milestoneDescription', type: 'textarea', table: false },
       { name: 'phase', type: 'select', required: true, optionsFrom: 'phases', optionValue: 'phaseId', optionLabel: 'phaseTitle' },
       { name: 'mOwner', type: 'select', required: true, options: ['student', 'supervisor', 'lead', 'coordinator'], errorMessage: 'Owner must be student, supervisor, lead, or coordinator.' },
@@ -182,6 +183,7 @@ export const APP_TABLES: Record<string, TableDef> = {
       { name: 'Title', type: 'text', required: true },
       { name: 'Description', type: 'textarea', table: false },
       { name: 'DueDate', type: 'date', label: 'Due date' },
+      { name: 'DueTime', type: 'time', label: 'Due time (Hong Kong)' },
       { name: 'Status', type: 'select', required: true, options: ['Pending', 'In Progress', 'Completed'], defaultValue: 'Pending' },
       { name: 'LastUpdated', type: 'datetime', required: true, form: false, label: 'Updated' },
       { name: 'CreatedBy', type: 'email', validator: 'email', form: false, table: false },
@@ -387,6 +389,7 @@ export function validateRecordFields(entity: string, values: Record<string, any>
     }
     if (field.type === 'number' && !isFinite(Number(value))) throw new HubError(`${field.name} must be a number.`);
     if (field.type === 'date' && isNaN(Date.parse(String(value)))) throw new HubError(`${field.name} must be a valid date.`);
+    if (field.type === 'time') dueTimeValue(value);
     if (field.type === 'url' && !/^https:\/\/\S+$/i.test(text(value))) throw new HubError(`${field.name} must be an HTTPS URL.`);
     if (field.type === 'checkbox' && typeof value !== 'boolean' && !['true', 'false', '1', '0', 'yes', 'no'].includes(String(value).toLowerCase())) {
       throw new HubError(`${field.name} must be checked or unchecked.`);

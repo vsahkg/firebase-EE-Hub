@@ -1,7 +1,7 @@
 import { adminDialogKind, closeAdminDialog, listingDialogKind, openAdminDialog } from './records.js';
 import { callServer } from '../shared/api.js';
 import { showError, showSuccess } from '../shared/feedback.js';
-import { cssEscape, escapeHtml, formatActivityWhen } from '../shared/html.js';
+import { cssEscape, escapeHtml, formatActivityWhen, milestoneOwnerLabel, milestoneOwnerTag } from '../shared/html.js';
 import { loadingLine } from '../shared/loading.js';
 import { isStale } from '../shared/scene.js';
 import { syncHeaderCohortSelect } from '../shared/staffContext.js';
@@ -55,7 +55,7 @@ export function noticeHint(audience, mOwner) {
 export function noticeOptions(items, value, valueKey, labelKey) {
   return items.map(function(item) {
     const itemValue = item[valueKey];
-    return `<option value="${escapeHtml(itemValue)}" ${itemValue === value ? 'selected' : ''}>${escapeHtml(item[labelKey])}</option>`;
+    return `<option value="${escapeHtml(itemValue)}" ${itemValue === value ? 'selected' : ''}>${escapeHtml(item[labelKey])} · ${escapeHtml(milestoneOwnerLabel(item.mOwner))}</option>`;
   }).join('');
 }
 
@@ -135,7 +135,8 @@ export function noticeLogMarkup() {
   const body = rows.length ? `<div class="table-wrap"><table class="notify-table"><thead><tr>${sortableHeader('notice-log', 'sent', 'When')}${sortableHeader('notice-log', 'student', 'Student')}${sortableHeader('notice-log', 'milestone', 'Milestone')}${sortableHeader('notice-log', 'to', 'To')}${sortableHeader('notice-log', 'status', 'Status')}</tr></thead><tbody>${rows.map(function(row) {
     const who = row.ruleKind === 'overlay' ? 'Supervisor reminder' : 'Cohort rule';
     const detail = [who, row.timing, row.audienceLabel, row.subject].filter(Boolean).join(' · ');
-    return `<tr><td>${escapeHtml(formatActivityWhen(row.sentAt))}</td><td>${escapeHtml(row.studentName || row.studentId || '—')}</td><td><strong>${escapeHtml(row.milestoneTitle || row.milestoneId)}</strong><div class="notify-meta">${escapeHtml(detail)}</div>${row.error ? `<div class="notify-meta">${escapeHtml(row.error)}</div>` : ''}</td><td>${escapeHtml((row.recipients || []).join(', ') || '—')}</td><td>${escapeHtml(noticeStatusLabel(row.status))}</td></tr>`;
+    const milestone = noticeMilestone(row.milestoneId);
+    return `<tr><td>${escapeHtml(formatActivityWhen(row.sentAt))}</td><td>${escapeHtml(row.studentName || row.studentId || '—')}</td><td><strong>${escapeHtml(row.milestoneTitle || row.milestoneId)}</strong> ${milestoneOwnerTag(milestone && milestone.mOwner)}<div class="notify-meta">${escapeHtml(detail)}</div>${row.error ? `<div class="notify-meta">${escapeHtml(row.error)}</div>` : ''}</td><td>${escapeHtml((row.recipients || []).join(', ') || '—')}</td><td>${escapeHtml(noticeStatusLabel(row.status))}</td></tr>`;
   }).join('')}</tbody></table></div>` : '<div class="empty">No reminders have been emailed for this filter.</div>';
   return `<section class="notify-card" aria-labelledby="notice-log-heading"><div class="toolbar"><h2 id="notice-log-heading">Email log</h2></div><p class="muted">Coordinators see every reminder for this cohort. A supervisor sees mail from their own reminders. A sent reminder also appears on the student’s activity.</p>${body}</section>`;
 }
@@ -182,7 +183,7 @@ export function noticeRowMarkup(row, kind, editRules, editOverlays, actor, canSe
     canDelete ? `<button type="button" class="link-button" data-notice-delete="${kind}" data-notice-id="${escapeHtml(row.ruleId)}">Delete</button>` : ''
   ].filter(Boolean).join('');
   const note = row.note ? `<div class="notify-meta">${escapeHtml(row.note.length > 90 ? row.note.slice(0, 87) + '…' : row.note)}</div>` : '';
-  return `<tr><td><strong>${escapeHtml(row.milestoneTitle)}</strong>${note}</td><td>${escapeHtml(row.timingLabel)}</td><td>${escapeHtml(row.audienceLabel)}<div class="notify-meta">${escapeHtml(row.audienceHint)}</div></td>${kind === 'overlay' ? `<td>${escapeHtml(noticeStudentName(row.studentId))}</td>` : ''}<td>${toggle}</td><td class="actions">${actions}</td></tr>`;
+  return `<tr><td><strong>${escapeHtml(row.milestoneTitle)}</strong> ${milestoneOwnerTag(row.mOwner)}${note}</td><td>${escapeHtml(row.timingLabel)}</td><td>${escapeHtml(row.audienceLabel)}<div class="notify-meta">${escapeHtml(row.audienceHint)}</div></td>${kind === 'overlay' ? `<td>${escapeHtml(noticeStudentName(row.studentId))}</td>` : ''}<td>${toggle}</td><td class="actions">${actions}</td></tr>`;
 }
 
 export function noticeEditorMarkup(kind, actor) {
@@ -441,7 +442,7 @@ export function paintNoticeSend(dialog, preview, kind, ruleId, target, back) {
   }).join('');
   const skipBlock = skipped ? `<h3>Not included</h3><ul class="notify-preview">${skipped}</ul>` : '';
   const truncated = preview.truncated ? '<p class="notice">Showing the first 200 messages.</p>' : '';
-  dialog.innerHTML = `<div class="form-panel notify-send-panel" role="dialog" aria-modal="true" aria-labelledby="notice-send-title"><div class="toolbar"><h2 id="notice-send-title">Preview and send</h2><button type="button" class="button secondary" id="notice-send-close">Close</button></div><p class="lede">${escapeHtml(preview.milestoneTitle || 'Reminder')} · ${escapeHtml(preview.timing || '')} · ${escapeHtml(preview.audience || '')}</p><p class="muted">Today is ${escapeHtml(preview.today || '')}. These are the messages this reminder would send. Choose which ones to email.</p>${blocked ? `<p class="notice">${escapeHtml(blocked)}</p>` : ''}${truncated}${choices}${skipBlock}<p class="notice error" id="notice-send-error" hidden></p><div class="toolbar"><button type="button" class="button secondary" id="notice-send-cancel">Cancel</button><button type="button" class="button" id="notice-send-selected"${canSend && messages.length ? '' : ' disabled'}${canSend ? '' : ' data-blocked="1"'}>Send selected${messages.length ? ' (' + messages.length + ')' : ''}</button></div></div>`;
+  dialog.innerHTML = `<div class="form-panel notify-send-panel" role="dialog" aria-modal="true" aria-labelledby="notice-send-title"><div class="toolbar"><h2 id="notice-send-title">Preview and send</h2><button type="button" class="button secondary" id="notice-send-close">Close</button></div><p class="lede">${escapeHtml(preview.milestoneTitle || 'Reminder')} ${milestoneOwnerTag(preview.mOwner)} · ${escapeHtml(preview.timing || '')} · ${escapeHtml(preview.audience || '')}</p><p class="muted">Today is ${escapeHtml(preview.today || '')}. These are the messages this reminder would send. Choose which ones to email.</p>${blocked ? `<p class="notice">${escapeHtml(blocked)}</p>` : ''}${truncated}${choices}${skipBlock}<p class="notice error" id="notice-send-error" hidden></p><div class="toolbar"><button type="button" class="button secondary" id="notice-send-cancel">Cancel</button><button type="button" class="button" id="notice-send-selected"${canSend && messages.length ? '' : ' disabled'}${canSend ? '' : ' data-blocked="1"'}>Send selected${messages.length ? ' (' + messages.length + ')' : ''}</button></div></div>`;
   document.getElementById('notice-send-close').addEventListener('click', closeNoticeSend);
   document.getElementById('notice-send-cancel').addEventListener('click', closeNoticeSend);
   dialog.onkeydown = function(event) { if (event.key === 'Escape') closeNoticeSend(); };
@@ -487,7 +488,7 @@ export function paintNoticePreview(result) {
   if (!host || !result) return;
   const items = result.items || [];
   const rows = items.length ? `<ul class="notify-preview">${items.map(function(item) {
-    return `<li><strong>${escapeHtml(item.studentName)}</strong> · ${escapeHtml(item.milestoneTitle)}<div class="notify-meta">${escapeHtml(item.timing)} · ${escapeHtml(item.audience)} · ${escapeHtml((item.recipients || []).join(', ') || 'No recipient')} · ${escapeHtml(item.status || '')}</div><div>${escapeHtml(item.subject || '')}</div>${item.error ? `<div class="notify-meta">${escapeHtml(item.error)}</div>` : ''}</li>`;
+    return `<li><strong>${escapeHtml(item.studentName)}</strong> · ${escapeHtml(item.milestoneTitle)} ${milestoneOwnerTag(item.mOwner)}<div class="notify-meta">${escapeHtml(item.timing)} · ${escapeHtml(item.audience)} · ${escapeHtml((item.recipients || []).join(', ') || 'No recipient')} · ${escapeHtml(item.status || '')}</div><div>${escapeHtml(item.subject || '')}</div>${item.error ? `<div class="notify-meta">${escapeHtml(item.error)}</div>` : ''}</li>`;
   }).join('')}</ul>` : '<div class="empty">Nothing is due to send today for this cohort.</div>';
   host.innerHTML = `<section class="notify-card"><h2>Today, ${escapeHtml(result.today || '')}</h2><p class="muted">${result.considered || 0} ready, ${result.skipped || 0} skipped.${result.dryRun ? ' Nothing was sent.' : ''}</p>${rows}</section>`;
 }

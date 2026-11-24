@@ -318,6 +318,13 @@ function coerceCell(field: FieldDef | undefined, header: string, value: unknown)
   }
   if (field?.type === 'date') return dateOnlyFromSheet(value);
   if (field?.type === 'datetime') return dateTimeFromSheet(value);
+  if (field?.type === 'time' && typeof value === 'number' && Number.isFinite(value)) {
+    const minutes = value * 1440;
+    if (value >= 0 && value < 1 && Math.abs(minutes - Math.round(minutes)) < 0.000001) {
+      const rounded = Math.round(minutes);
+      return `${String(Math.floor(rounded / 60)).padStart(2, '0')}:${String(rounded % 60).padStart(2, '0')}`;
+    }
+  }
   if (field?.type === 'email' || field?.validator === 'email') return normalizeEmail(value);
   if (typeof value === 'boolean' || typeof value === 'number') return value;
   return text(value);

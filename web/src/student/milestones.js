@@ -1,7 +1,7 @@
 import { callServer, runMutation } from '../shared/api.js';
 import { showError, showSuccess } from '../shared/feedback.js';
 import { openFormShell } from '../shared/forms.js';
-import { escapeHtml } from '../shared/html.js';
+import { escapeHtml, milestoneOwnerLabel, milestoneOwnerTag } from '../shared/html.js';
 import { state } from '../shared/state.js';
 import { openStudentForm } from './studentForm.js';
 import { milestonePhaseId, milestoneTitleText, openStudentSection } from './home.js';
@@ -29,7 +29,9 @@ export function viewStudentForm(milestoneId) {
       const shown = !answers ? 'No response yet' : (field.type === 'checks' && raw ? String(raw).split('; ').join(', ') : (raw || '—'));
       return `<p><strong>${escapeHtml(field.label)}</strong><br>${escapeHtml(shown)}</p>`;
     }).join('');
-    openFormShell(form.title || 'Form', body, '', null);
+    const home = state.staffStudentHome || state.studentHome;
+    const template = ((home && home.templates) || []).find(function(entry) { return entry.milestoneId === milestoneId; });
+    openFormShell((form.title || 'Form') + ' · ' + milestoneOwnerLabel(template && template.mOwner), body, '', null);
   }).catch(showError);
 }
 
@@ -117,13 +119,14 @@ export function openMilestoneEditor(home, taskId, milestoneId) {
   const due = item && item.DueDate ? String(item.DueDate).slice(0, 10) : '';
   const phase = item ? milestonePhaseId(template, item) : (template.phase || '');
   openMilestoneDialog(`<div class="form-panel" role="dialog" aria-modal="true" aria-labelledby="milestone-editor-title"><div class="toolbar"><h2 id="milestone-editor-title">Edit milestone</h2><button type="button" class="button secondary" data-close-milestone>Close</button></div>
-    <p class="muted">${escapeHtml(home.displayName || 'Student')} · ${escapeHtml(template.milestoneId || (item && item.TemplateId) || '')}</p>
+    <p class="muted">${escapeHtml(home.displayName || 'Student')} · ${escapeHtml(template.milestoneId || (item && item.TemplateId) || '')} ${milestoneOwnerTag(template.mOwner)}</p>
     <form id="milestone-edit-form"><div class="form-grid">
       <div class="field wide"><label for="milestone-title">Title</label><input id="milestone-title" maxlength="500" required value="${escapeHtml(title)}"></div>
       <div class="field wide"><label for="milestone-description">Description</label><textarea id="milestone-description" maxlength="8000">${escapeHtml((item && item.Description) || template.description || '')}</textarea></div>
       <div class="field"><label for="milestone-phase">Phase</label><select id="milestone-phase" required>${phaseOptionMarkup(home, phase)}</select></div>
       <div class="field"><label for="milestone-status">Status</label><select id="milestone-status" required>${statusOptionMarkup(item && item.Status)}</select></div>
       <div class="field"><label for="milestone-date">Due date</label><input id="milestone-date" type="date" value="${escapeHtml(due)}"></div>
+      <div class="field"><label for="milestone-time">Due time (Hong Kong)</label><input id="milestone-time" type="time" value="${escapeHtml(item ? item.DueTime || '' : template.DueTime || '')}"></div>
     </div>
     <p class="notice error" id="milestone-edit-error" hidden></p>
     <div class="toolbar"><button class="button" type="submit">Save</button><button class="button secondary" type="button" data-close-milestone>Cancel</button></div></form></div>`);
@@ -141,6 +144,7 @@ export function openMilestoneEditor(home, taskId, milestoneId) {
       phaseId: document.getElementById('milestone-phase').value,
       status: document.getElementById('milestone-status').value,
       dueDate: document.getElementById('milestone-date').value,
+      dueTime: document.getElementById('milestone-time').value,
       milestoneId: template.milestoneId || templateId
     };
     const savedTaskId = item ? item.TaskId : '';
@@ -176,14 +180,17 @@ export function sharedAssignmentValues(students, templateId) {
       if (item.templateId === templateId) rows.push(item);
     });
   });
-  if (!rows.length) return { status: 'Pending', due: '', uniformStatus: true, uniformDate: true };
+  if (!rows.length) return { status: 'Pending', due: '', time: '', uniformStatus: true, uniformDate: true, uniformTime: true };
   const status = rows[0].status || '';
   const due = String(rows[0].due || '').slice(0, 10);
+  const time = rows[0].dueTime || '';
   return {
     status: rows.every(function(row) { return (row.status || '') === status; }) ? status : '',
     due: rows.every(function(row) { return String(row.due || '').slice(0, 10) === due; }) ? due : '',
+    time: rows.every(function(row) { return (row.dueTime || '') === time; }) ? time : '',
     uniformStatus: rows.every(function(row) { return (row.status || '') === status; }),
-    uniformDate: rows.every(function(row) { return String(row.due || '').slice(0, 10) === due; })
+    uniformDate: rows.every(function(row) { return String(row.due || '').slice(0, 10) === due; }),
+    uniformTime: rows.every(function(row) { return (row.dueTime || '') === time; })
   };
 }
 
@@ -199,7 +206,8 @@ export function openMassMilestoneEditor(home, onSaved) {
   const choices = commonMilestoneChoices(home, students);
   const options = choices.length
     ? '<option value="">Choose a milestone</option>' + choices.map(function(choice) {
-      return `<option value="${escapeHtml(choice.id)}">${escapeHtml(choice.title)}</option>`;
+      const template = (home.templates || []).find(function(entry) { return entry.milestoneId === choice.id; });
+      return `<option value="${escapeHtml(choice.id)}">${escapeHtml(choice.title)} · ${escapeHtml(milestoneOwnerLabel(template && template.mOwner))}</option>`;
     }).join('')
     : '<option value="">No shared milestone</option>';
   openMilestoneDialog(`<div class="form-panel" role="dialog" aria-modal="true" aria-labelledby="mass-milestone-title"><div class="toolbar"><h2 id="mass-milestone-title">Edit Milestones</h2><button type="button" class="button secondary" data-close-milestone>Close</button></div>
@@ -219,6 +227,11 @@ export function openMassMilestoneEditor(home, onSaved) {
           <input id="mass-date" type="date" disabled>
           <p class="muted mass-hint" id="mass-date-hint"></p>
         </div>
+        <div class="mass-field">
+          <label class="check-option" for="mass-update-time"><input type="checkbox" id="mass-update-time"> Update due time (Hong Kong)</label>
+          <input id="mass-time" type="time" disabled>
+          <p class="muted mass-hint" id="mass-time-hint">Leave blank to remove the time.</p>
+        </div>
       </div>
       <p class="notice error" id="milestone-edit-error" hidden></p>
       <div class="toolbar"><button class="button" type="submit" id="save-mass-milestones" disabled>Save</button><button class="button secondary" type="button" data-close-milestone>Cancel</button></div>
@@ -226,21 +239,26 @@ export function openMassMilestoneEditor(home, onSaved) {
   const milestone = document.getElementById('mass-milestone');
   const statusBox = document.getElementById('mass-update-status');
   const dateBox = document.getElementById('mass-update-date');
+  const timeBox = document.getElementById('mass-update-time');
   const statusField = document.getElementById('mass-status');
   const dateField = document.getElementById('mass-date');
+  const timeField = document.getElementById('mass-time');
   const save = document.getElementById('save-mass-milestones');
   function paintShared() {
     const shared = sharedAssignmentValues(students, milestone.value);
     if (shared.uniformStatus && shared.status) statusField.value = shared.status;
     statusField.dataset.shared = shared.uniformStatus ? 'yes' : '';
     dateField.value = shared.uniformDate ? shared.due : '';
+    timeField.value = shared.uniformTime ? shared.time : '';
     document.getElementById('mass-status-hint').textContent = !milestone.value ? '' : (shared.uniformStatus ? '' : 'Status differs across the selected students.');
     document.getElementById('mass-date-hint').textContent = !milestone.value ? '' : (shared.uniformDate ? '' : 'Due dates differ across the selected students.');
+    document.getElementById('mass-time-hint').textContent = !milestone.value || shared.uniformTime ? 'Leave blank to remove the time.' : 'Due times differ across the selected students. Leave blank to remove them.';
   }
   function syncMassFields() {
     statusField.disabled = !statusBox.checked;
     dateField.disabled = !dateBox.checked;
-    save.disabled = !milestone.value || (!statusBox.checked && !dateBox.checked);
+    timeField.disabled = !timeBox.checked;
+    save.disabled = !milestone.value || (!statusBox.checked && !dateBox.checked && !timeBox.checked);
   }
   milestone.addEventListener('change', function() {
     paintShared();
@@ -248,6 +266,7 @@ export function openMassMilestoneEditor(home, onSaved) {
   });
   statusBox.addEventListener('change', syncMassFields);
   dateBox.addEventListener('change', syncMassFields);
+  timeBox.addEventListener('change', syncMassFields);
   document.getElementById('mass-milestone-form').addEventListener('submit', function(event) {
     event.preventDefault();
     const errorNode = document.getElementById('milestone-edit-error');
@@ -256,8 +275,8 @@ export function openMassMilestoneEditor(home, onSaved) {
       milestoneDialogError(new Error('Choose a milestone.'));
       return;
     }
-    if (!statusBox.checked && !dateBox.checked) {
-      milestoneDialogError(new Error('Choose the status, the due date, or both.'));
+    if (!statusBox.checked && !dateBox.checked && !timeBox.checked) {
+      milestoneDialogError(new Error('Choose a status, due date, or due time to update.'));
       return;
     }
     if (dateBox.checked && !dateField.value) {
@@ -269,7 +288,9 @@ export function openMassMilestoneEditor(home, onSaved) {
       updateStatus: statusBox.checked,
       status: statusField.value,
       updateDate: dateBox.checked,
-      dueDate: dateField.value
+      dueDate: dateField.value,
+      updateTime: timeBox.checked,
+      dueTime: timeField.value
     };
     const emails = students.map(function(student) { return student.email; });
     runMutation('massUpdateMilestones', [home.cohortId || state.cohortId || '', emails, milestone.value, payload, state.actingAs], {

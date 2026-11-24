@@ -36,6 +36,21 @@ export function shortDate(value) {
   return Number(parts[2]) + ' ' + MONTHS[Number(parts[1]) - 1] + ' ' + parts[0];
 }
 
+export function milestoneDueLabel(date, time) {
+  const day = shortDate(date);
+  return day ? day + (time ? ' · ' + String(time) + ' HKT' : '') : '';
+}
+
+export function milestoneOwnerLabel(owner) {
+  const labels = { student: 'Student', supervisor: 'Supervisor', lead: 'Subject lead', coordinator: 'Coordinator' };
+  const key = String(owner || '').toLowerCase();
+  return Object.prototype.hasOwnProperty.call(labels, key) ? labels[key] : 'Owner unknown';
+}
+
+export function milestoneOwnerTag(owner) {
+  return `<span class="milestone-owner">${milestoneOwnerLabel(owner)}</span>`;
+}
+
 export function formatActivityWhen(value) {
   const text = String(value || '');
   const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);

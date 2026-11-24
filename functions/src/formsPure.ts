@@ -1,4 +1,4 @@
-import { HubError, clockParts, formatHubDate, startOfScriptDay, text } from './util';
+import { HubError, clockParts, formatHubDate, milestoneDeadline, startOfScriptDay, text } from './util';
 
 export const FORM_FIELD_TYPES = ['text', 'textarea', 'number', 'date', 'select', 'checkbox', 'checks'];
 export const FORM_SYSTEM_COLUMNS = ['StudentId', 'FormVersion', 'Status', 'SubmittedAt', 'LastUpdated'];
@@ -135,7 +135,11 @@ export function dueDateFacts(dueValue: unknown, timeZone: string): DueFacts {
   return { date, timed: false, year, month, day };
 }
 
-export function formWritesClosed(dueValue: unknown, now: Date, timeZone: string): boolean {
+export function formWritesClosed(dueValue: unknown, now: Date, timeZone: string, dueTime?: unknown): boolean {
+  if (text(dueValue) && text(dueTime)) {
+    const deadline = milestoneDeadline(dueValue, dueTime);
+    return !deadline || isNaN(now.getTime()) || now.getTime() > deadline.getTime();
+  }
   const facts = dueDateFacts(dueValue, timeZone);
   if (facts.missing) return false;
   if (facts.invalid || !facts.date) return true;
@@ -145,7 +149,11 @@ export function formWritesClosed(dueValue: unknown, now: Date, timeZone: string)
   return now.getTime() >= deadline.getTime();
 }
 
-export function formClosedMessage(dueValue: unknown, timeZone: string): string {
+export function formClosedMessage(dueValue: unknown, timeZone: string, dueTime?: unknown): string {
+  if (text(dueValue) && text(dueTime)) {
+    const deadline = milestoneDeadline(dueValue, dueTime);
+    if (deadline) return `This form's due date has passed (${formatHubDate(deadline, 'Asia/Hong_Kong', true)} HKT). Answers can no longer be changed.`;
+  }
   const facts = dueDateFacts(dueValue, timeZone);
   if (facts.missing || facts.invalid || !facts.date) {
     return 'This form is closed because its due date could not be read. Answers can no longer be changed.';

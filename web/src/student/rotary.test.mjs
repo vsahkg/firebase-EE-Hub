@@ -70,6 +70,18 @@ test('milestone months include the next due date and the calendar has no range c
   assert.doesNotMatch(shell + month, /Earlier|Later|<details|Range/);
 });
 
+test('calendar milestones show their owner and Hong Kong due time', () => {
+  const timed = {
+    ...home,
+    templates: [{ ...home.templates[1], mOwner: 'supervisor' }],
+    actionItems: [{ ...home.actionItems[1], DueTime: '15:30' }],
+  };
+  const marks = milestoneMarks(timed);
+  const html = renderMonthHtml(2026 * 12 + 11, marks, '');
+  assert.match(html, /milestone-owner">Supervisor/);
+  assert.match(html, /15:30 HKT/);
+});
+
 test('doc comments are distinct cards and deep-link with disco', () => {
   const href = docCommentHref(home.links.doc, 'comment-9');
   assert.equal(href, 'https://docs.google.com/document/d/abc123/edit?disco=comment-9');

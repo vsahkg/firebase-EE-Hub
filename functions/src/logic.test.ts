@@ -104,6 +104,14 @@ test('a date-only form closes on the next local day and stays open without a due
   assert.equal(formWritesClosed('2026-10-06', new Date('2026-10-06T12:00:00Z'), 'UTC'), false);
 });
 
+test('a timed form uses Hong Kong time, including midnight, independently of server timezone', () => {
+  assert.equal(formWritesClosed('2026-10-06', new Date('2026-10-06T07:30:00Z'), 'UTC', '15:30'), false);
+  assert.equal(formWritesClosed('2026-10-06', new Date('2026-10-06T07:30:01Z'), 'UTC', '15:30'), true);
+  assert.equal(formWritesClosed('2026-10-06', new Date('2026-10-05T16:00:01Z'), 'UTC', '00:00'), true);
+  assert.equal(formWritesClosed('', new Date('2026-10-06T12:00:00Z'), 'UTC', '15:30'), false);
+  assert.throws(() => formWritesClosed('2026-10-06', new Date(), 'UTC', '25:00'), /DueTime/);
+});
+
 test('ticket routing shows shared messages to the right queue', () => {
   const ticket: TicketShape = {
     studentId: student.email,

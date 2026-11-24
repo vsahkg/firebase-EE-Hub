@@ -1,7 +1,7 @@
 import { adminDialogKind, openAdminDialog } from './records.js';
 import { callServer } from '../shared/api.js';
 import { showError, showSuccess } from '../shared/feedback.js';
-import { escapeHtml } from '../shared/html.js';
+import { escapeHtml, milestoneOwnerLabel, milestoneOwnerTag } from '../shared/html.js';
 import { milestoneManagementPreviewMarkup, sameRemainingPreview } from './milestoneManagementPreview.js';
 
 export function openMilestoneManagement(cohortId, milestones, onPlanChanged) {
@@ -20,7 +20,7 @@ export function openMilestoneManagement(cohortId, milestones, onPlanChanged) {
   function active() { return adminDialogKind() === 'milestone-management' && document.getElementById('management-preview') === host; }
   function options(value) {
     select.innerHTML = `<option value="">All milestones (${available.length})</option>${available.map(function(item) {
-      return `<option value="${escapeHtml(item.milestoneId)}">${escapeHtml(item.milestoneTitle || item.milestoneId)}</option>`;
+      return `<option value="${escapeHtml(item.milestoneId)}">${escapeHtml(item.milestoneTitle || item.milestoneId)} · ${escapeHtml(milestoneOwnerLabel(item.mOwner))}</option>`;
     }).join('')}`;
     select.value = available.some(function(item) { return item.milestoneId === value; }) ? value : '';
   }
@@ -36,7 +36,7 @@ export function openMilestoneManagement(cohortId, milestones, onPlanChanged) {
         return group.preview.assignments.length || group.preview.excluded.some(function(row) { return row.reason === 'legacy'; });
       });
       host.innerHTML = `${groups.length ? groups.map(function(group) {
-        return `<details open data-management-group="${escapeHtml(group.item.milestoneId)}"><summary>${escapeHtml(group.item.milestoneTitle || group.item.milestoneId)}</summary>${milestoneManagementPreviewMarkup(group.preview)}</details>`;
+        return `<details open data-management-group="${escapeHtml(group.item.milestoneId)}"><summary>${escapeHtml(group.item.milestoneTitle || group.item.milestoneId)} ${milestoneOwnerTag(group.item.mOwner)}</summary>${milestoneManagementPreviewMarkup(group.preview)}</details>`;
       }).join('') : '<p class="muted">No milestones in this cohort.</p>'}
         <p class="notice">Only selected cohort-tagged assignments are changed. Archive preserves the assignment and milestone for later restoration. Delete is permanent. Form responses, milestone events, notes and audit history are retained. Legacy assignments without a cohort ID are excluded and block milestone deletion until their ownership is resolved separately.</p>
         <div class="toolbar"><button type="button" class="button secondary" data-management-action="reset">Reset selected</button><button type="button" class="button secondary" data-management-action="archive">Archive selected</button><button type="button" class="button danger" data-management-action="delete">Delete selected</button><button type="button" class="button danger" data-management-delete-milestones${!groups.length || blocked ? ' disabled' : ''}>Delete ${groups.length === 1 ? 'milestone' : 'all reviewed milestones'}</button></div>`;
@@ -109,7 +109,7 @@ export function openMilestoneManagement(cohortId, milestones, onPlanChanged) {
     callServer('listCohortMilestoneArchives', cohortId).then(function(entries) {
       if (!active()) return;
       archiveHost.innerHTML = entries.length ? `<div class="table-wrap milestone-management-table"><table><thead><tr><th>Milestone</th><th>Student</th><th>Status</th><th>Archived</th><th></th></tr></thead><tbody>${entries.map(function(entry) {
-        return `<tr><td>${escapeHtml(entry.milestone.milestoneTitle || entry.task.TemplateId)}</td><td>${escapeHtml(entry.task.StudentId || entry.task.studentId)}</td><td>${escapeHtml(entry.task.Status)}</td><td>${escapeHtml(entry.archivedAt)}</td><td><button type="button" class="button secondary" data-restore-archive="${escapeHtml(entry.id)}">Restore</button></td></tr>`;
+        return `<tr><td>${escapeHtml(entry.milestone.milestoneTitle || entry.task.TemplateId)} ${milestoneOwnerTag(entry.milestone.mOwner)}</td><td>${escapeHtml(entry.task.StudentId || entry.task.studentId)}</td><td>${escapeHtml(entry.task.Status)}</td><td>${escapeHtml(entry.archivedAt)}</td><td><button type="button" class="button secondary" data-restore-archive="${escapeHtml(entry.id)}">Restore</button></td></tr>`;
       }).join('')}</tbody></table></div>` : '<p class="muted">No archived assignments.</p>';
       archiveHost.querySelectorAll('[data-restore-archive]').forEach(function(button) {
         button.addEventListener('click', async function() {

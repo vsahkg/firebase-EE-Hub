@@ -495,7 +495,7 @@ export function fieldMarkup(field, value, editing) {
     }).join('');
     return `<div class="field wide"><label>${escapeHtml(label)}</label><div class="check-grid" role="group" aria-label="${escapeHtml(label)}">${boxes || '<span class="muted">Add active subjects under Admin → Subjects.</span>'}</div></div>`;
   }
-  const inputType = ['text', 'email', 'url', 'number', 'date'].indexOf(field.type) >= 0 ? field.type : 'text';
+  const inputType = ['text', 'email', 'url', 'number', 'date', 'time'].indexOf(field.type) >= 0 ? field.type : 'text';
   const formatted = escapeHtml(formatValue(currentValue));
   const control = field.type === 'textarea'
     ? `<textarea data-field="${escapeHtml(name)}" ${required} ${disabled}>${formatted}</textarea>`

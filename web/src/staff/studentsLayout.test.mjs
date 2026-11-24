@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { state } from '../shared/state.js';
 import { staffStudentDrawersHtml } from '../shared/studentDrawers.js';
-import { rememberStaffViewMode, renderStaffStudentList, staffViewMode, staffViewModeControl } from './students.js';
+import { rememberStaffViewMode, renderCohortJourney, renderStaffStudentList, staffViewMode, staffViewModeControl } from './students.js';
 
 const home = {
   canEditMilestones: false,
@@ -42,6 +42,23 @@ test('one viewMode control offers Tiles, List collapsed, and List expanded', () 
   assert.equal(staffViewMode(), 'list-expanded');
   rememberStaffViewMode('somewhere-else');
   assert.equal(staffViewMode(), 'tiles');
+});
+
+test('cohort journey groups visible students by date and time and escapes names', () => {
+  const journeyHome = { ...home, templates: [{ ...home.templates[0], mOwner: 'supervisor', description: 'Review' }] };
+  const students = [
+    { displayName: 'Amy <Chen>', assigned: [{ templateId: 'm1', due: '2026-11-01', dueTime: '15:00' }] },
+    { displayName: 'Bob', assigned: [{ templateId: 'm1', due: '2026-11-01', dueTime: '15:00' }] },
+    { displayName: 'Carol', assigned: [{ templateId: 'm1', due: '2026-11-02' }] },
+    { displayName: 'Dan', assigned: [] },
+  ];
+  const html = renderCohortJourney(journeyHome, students);
+  assert.match(html, /milestone-owner">Supervisor/);
+  assert.match(html, /1 Nov 2026 · 15:00 HKT · 2 students/);
+  assert.match(html, /2 Nov 2026 · 1 student/);
+  assert.match(html, /Not assigned · 1 student/);
+  assert.match(html, /Amy &lt;Chen&gt;/);
+  assert.doesNotMatch(html, /<details open/);
 });
 
 test('list rows follow viewMode and the column no longer has its own expand button', () => {

@@ -43,6 +43,7 @@ import {
   listCohortMilestoneArchives,
   restoreCohortMilestoneAssignment,
   saveCohortMilestone,
+  setCohortMilestonesDueTime,
   saveCohortPhase,
   saveCohortPlanAnchor,
   seedCohortPathway,
@@ -135,6 +136,7 @@ export async function dispatch(app: App, method: string, args: unknown[]): Promi
     case 'saveCohortPhase': return saveCohortPhase(app, args[0], (args[1] || {}) as any, args[2]);
     case 'deleteCohortPhase': return deleteCohortPhase(app, args[0], args[1]);
     case 'saveCohortMilestone': return saveCohortMilestone(app, args[0], (args[1] || {}) as any, args[2]);
+    case 'setCohortMilestonesDueTime': return setCohortMilestonesDueTime(app, args[0], args[1], args[2]);
     case 'deleteCohortMilestone': return deleteCohortMilestone(app, args[0], args[1]);
     case 'previewCohortMilestoneAssignments': return previewCohortMilestoneAssignments(app, args[0], args[1]);
     case 'manageCohortMilestoneAssignments': return manageCohortMilestoneAssignments(app, args[0], args[1], args[2], args[3], args[4]);

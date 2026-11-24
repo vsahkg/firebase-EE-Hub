@@ -207,6 +207,11 @@ a.icon-button svg { display: block; }
 .journey-step-toggle { display: flex; flex: 1; align-items: baseline; gap: 6px 10px; width: 100%; min-width: 0; padding: 0; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
 .journey-step-toggle:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
 .journey-step-title { flex: 1; min-width: 0; font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.milestone-owner { display: inline-block; padding: 1px 5px; border: 1px solid currentColor; border-radius: 999px; font-size: 10px; font-weight: 600; line-height: 1.4; }
+.cohort-journey-drawer:not([hidden]) { position: fixed; top: 0; right: 0; z-index: 40; display: flex; flex-direction: column; width: min(420px, 100vw); height: 100vh; background: #f6f8f9; border-left: 1px solid var(--line); box-shadow: -8px 0 24px rgba(0, 30, 50, .12); }
+.cohort-journey-milestone { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.cohort-journey-milestone summary { cursor: pointer; }
+.cohort-journey-milestone > summary { font-weight: 700; }
 .journey-step-toggle .muted { font-size: 13px; }
 .journey-step-chevron { flex: none; width: 8px; height: 8px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); }
 .journey-step-toggle[aria-expanded="true"] .journey-step-chevron { transform: rotate(225deg); }
