@@ -201,6 +201,28 @@ test('cohort due time dispatch validates access and selections and reports parti
   assert.deepEqual(calls, ['m1:10:00', 'anchor:10:00', 'm1:']);
 });
 
+test('reset dispatch requires admin and a seeded cohort', async () => {
+  const store = new MemoryStore();
+  await seedTemplate(store);
+  const app = appFor(store, coordinator);
+  await assert.rejects(dispatch(appFor(store, student), 'resetCohortPathway', ['2027']), /Access denied/);
+  await assert.rejects(dispatch(app, 'resetCohortPathway', ['2027']), /Create this cohort/);
+  await seedCohortPathway(app, '2027', { kind: 'template' }, '2027-12-01');
+  app.store.resetCohortPathway = async (cohort, actor) => {
+    assert.equal(cohort, '2027');
+    assert.equal(actor, coordinator.email);
+    await store.set(COLLECTIONS.cohorts, cohort, { ...await store.get(COLLECTIONS.cohorts, cohort), PathwaySeeded: false, PlanAnchor: '' });
+    store.phases[cohort] = {};
+    store.milestones[cohort] = {};
+    return { archived: 2, milestones: 2, phases: 2 };
+  };
+  assert.deepEqual(await dispatch(app, 'resetCohortPathway', ['2027']), { archived: 2, milestones: 2, phases: 2 });
+  const plan = await getPathwayPlan(app, { mode: 'cohort', cohortId: '2027' });
+  assert.equal(plan.seeded, false);
+  assert.ok(plan.sources.some((source) => source.kind === 'template'));
+  assert.deepEqual(plan.milestones.records, []);
+});
+
 test('seeding a cohort copies the template onto a new anchor and leaves the template alone', async () => {
   const store = new MemoryStore();
   await seedTemplate(store);

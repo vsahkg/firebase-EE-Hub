@@ -6,6 +6,15 @@ import { fileURLToPath } from 'node:url';
 
 const adminDir = path.dirname(fileURLToPath(import.meta.url));
 
+test('cohort pathway reset warns about archived progress and requires confirmation', () => {
+  const html = source('pathway.js');
+  assert.match(html, /will be archived with their progress/);
+  assert.match(html, /original phase and milestone/);
+  assert.match(html, /Legacy assignments without a cohort ID/);
+  assert.match(html, /id="pathway-reset-confirm" type="checkbox" required/);
+  assert.match(source('records.js'), /kind === 'pathway-reset'/);
+});
+
 function source(name) {
   return fs.readFileSync(path.join(adminDir, name), 'utf8');
 }

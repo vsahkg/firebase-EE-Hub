@@ -1,4 +1,4 @@
-import { closeAdminDialog, openAdminDialog } from './records.js';
+import { adminDialogKind, closeAdminDialog, openAdminDialog } from './records.js';
 import { openMilestoneManagement } from './milestoneManagement.js';
 import { renderAdmin } from './sections.js';
 import { requestPush } from '../router.js';
@@ -545,7 +545,7 @@ export function pathwayMarkup() {
     <div class="plan-main">
     ${calendar}
     <section class="plan-block" aria-labelledby="plan-list-heading">
-      <div class="toolbar"><h2 id="plan-list-heading">Milestones</h2><button type="button" class="button" data-plan-action="add-milestone">Add milestone</button>${template ? '' : '<button type="button" class="button secondary" data-plan-action="manage-assignments">Manage milestones</button><button type="button" class="button secondary" data-plan-action="bulk-due-time">Apply due time</button>'}<button type="button" class="button secondary" data-plan-action="email-notifications">Email notifications</button><span class="muted">${template ? 'Edit the template list here. Hidden phases are left out.' : 'Edit the list here. Hidden phases are left out.'}</span></div>
+      <div class="toolbar"><h2 id="plan-list-heading">Milestones</h2><button type="button" class="button" data-plan-action="add-milestone">Add milestone</button>${template ? '' : '<button type="button" class="button secondary" data-plan-action="manage-assignments">Manage milestones</button><button type="button" class="button secondary" data-plan-action="bulk-due-time">Apply due time</button><button type="button" class="button danger" data-plan-action="reset-pathway">Reset cohort milestones</button>'}<button type="button" class="button secondary" data-plan-action="email-notifications">Email notifications</button><span class="muted">${template ? 'Edit the template list here. Hidden phases are left out.' : 'Edit the list here. Hidden phases are left out.'}</span></div>
       ${visible.length ? `<div class="plan-edit-list">${visible.map(pathwayMilestoneMarkup).join('')}</div>` : '<div class="empty">No milestones in the phases that are shown. Show a phase, or add a milestone.</div>'}
     </section>
     </div>
@@ -739,6 +739,7 @@ export function pathwayRunAction(node) {
   else if (action === 'phase-colour') pathwaySetPhaseColour(node.dataset.phaseId, node.dataset.colour);
   else if (action === 'delete-milestone') pathwayDeleteMilestone(node.dataset.milestoneId);
   else if (action === 'bulk-due-time') pathwayBulkDueTime();
+  else if (action === 'reset-pathway') pathwayResetCohort();
   else if (action === 'manage-assignments') {
     const plan = state.pathwayPlan;
     if (Object.keys(plan.saving).length || Object.keys(plan.timers).length) {
@@ -763,6 +764,46 @@ export function pathwayRunAction(node) {
   else if (action === 'seed') pathwaySeed();
   else if (action === 'email-notifications') openEmailNotifications('');
   else if (action === 'email-milestone') openEmailNotifications(node.dataset.milestoneId);
+}
+
+export function pathwayResetMarkup(cohortId) {
+  return `<div class="form-panel" role="dialog" aria-modal="true" aria-labelledby="pathway-reset-title">
+    <div class="toolbar"><h2 id="pathway-reset-title">Reset cohort milestones</h2><button type="button" class="button secondary" data-close-admin-dialog>Close</button></div>
+    <p class="notice">This removes all phases and milestones from cohort <strong>${escapeHtml(cohortId)}</strong> and clears its calendar anchor. Cohort-tagged milestone assignments, including former students’ assignments, will be archived with their progress. Other cohorts and the shared template are unchanged.</p>
+    <p>Form responses, notes, events, email reminder rules and audit history remain. Archived assignments can be reviewed after creating a new pathway; restoration may require the original phase and milestone and can be blocked by conflicts. Legacy assignments without a cohort ID for current cohort members must be resolved first; review former students’ legacy assignments separately. Until a new pathway is created, students may see the shared template.</p>
+    <form id="pathway-reset-form"><label class="check-option"><input id="pathway-reset-confirm" type="checkbox" required> I understand that this removes the cohort pathway and archives its milestone assignments.</label>
+    <div class="toolbar"><button type="submit" class="button danger">Reset cohort milestones</button><button type="button" class="button secondary" data-close-admin-dialog>Cancel</button></div></form></div>`;
+}
+
+export function pathwayResetCohort() {
+  const plan = state.pathwayPlan;
+  if (Object.keys(plan.saving).length || Object.keys(plan.timers).length) {
+    showError(new Error('Wait for pathway changes to finish saving before resetting.'));
+    return;
+  }
+  const scope = pathwayScopeNow();
+  openAdminDialog('pathway-reset', pathwayResetMarkup(scope.cohortId));
+  const form = document.getElementById('pathway-reset-form');
+  if (!form) return;
+  form.addEventListener('submit', function(event) {
+    event.preventDefault();
+    if (!form.querySelector('#pathway-reset-confirm').checked) return;
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    callServer('resetCohortPathway', scope.cohortId).then(function(result) {
+      if (adminDialogKind() === 'pathway-reset') closeAdminDialog();
+      if (result.auditWarning) showError(new Error('The pathway was reset, but the completion audit entry could not be written.'));
+      else showSuccess('Cohort pathway reset. Archived ' + result.archived + ' assignment(s).');
+      if (pathwayScopeCurrent(scope)) {
+        state.pathwayPlan.loaded = false;
+        renderPathwayPlanner(document.getElementById('admin-content'));
+      }
+    }).catch(function(error) {
+      if (isStale(error)) return;
+      if (form.isConnected) button.disabled = false;
+      showError(new Error('Reset could not be confirmed. Refresh the pathway to verify its state before retrying. ' + error.message));
+    });
+  });
 }
 
 export function pathwayBulkDueTime() {

@@ -65,6 +65,50 @@ export class Store {
     return (await this.milestoneActionDocuments(milestoneId)).map((doc) => doc.data() as Doc);
   }
 
+  async resetCohortPathway(cohortId: string, actor: string, now: string): Promise<{ archived: number; milestones: number; phases: number }> {
+    return this.db.runTransaction(async (transaction) => {
+      const cohortRef = this.col(COLLECTIONS.cohorts).doc(cohortId);
+      const [cohort, phases, milestones, members, cohortTasks] = await Promise.all([
+        transaction.get(cohortRef),
+        transaction.get(this.cohortPhases(cohortId)),
+        transaction.get(this.cohortMilestones(cohortId)),
+        transaction.get(this.members(cohortId)),
+        transaction.get(this.col(COLLECTIONS.studentActionItems).where('cohortId', '==', cohortId)),
+      ]);
+      if (!cohort.exists || !toBoolean(cohort.data()?.PathwaySeeded)) throw new HubError('This cohort no longer has a pathway. Refresh and try again.');
+      const milestoneById = new Map(milestones.docs.map((doc) => [doc.id, doc]));
+      milestones.docs.forEach((doc) => {
+        if (text(doc.data().milestoneId) !== doc.id) throw new HubError('A milestone ID does not match its document ID. Correct it before resetting.');
+      });
+      if (cohortTasks.docs.some((doc) => actionTemplateId(doc.data()) && !milestoneById.has(actionTemplateId(doc.data())))) {
+        throw new HubError('A cohort assignment refers to a missing milestone. Resolve it before resetting.');
+      }
+      const tasksByMilestone = await Promise.all(milestones.docs.map((doc) => this.milestoneActionDocuments(doc.id, transaction)));
+      const archives: { task: FirebaseFirestore.QueryDocumentSnapshot; milestone: FirebaseFirestore.QueryDocumentSnapshot }[] = [];
+      milestones.docs.forEach((milestone, index) => {
+        const tasks = tasksByMilestone[index];
+        const scope = milestoneAssignmentScope(tasks.map((doc) => doc.data() as Doc), members.docs.map((doc) => doc.data() as Doc), cohortId, milestone.id);
+        if (scope.excluded.some((row) => row.reason === 'legacy')) {
+          throw new HubError('A legacy assignment has no cohort ID. Resolve its ownership before resetting.');
+        }
+        const byId = new Map(tasks.map((doc) => [doc.id, doc]));
+        scope.assignments.forEach((assignment) => {
+          const task = byId.get(assignment.taskId);
+          if (!task || text(task.data().TaskId) !== task.id) throw new HubError('An action item TaskId does not match its document ID. Correct it before resetting.');
+          archives.push({ task, milestone });
+        });
+      });
+      archives.forEach(({ task, milestone }) => {
+        transaction.create(this.cohortMilestoneArchives(cohortId).doc(), { task: task.data(), milestone: milestone.data(), archivedAt: now, archivedBy: actor });
+        transaction.delete(task.ref);
+      });
+      milestones.docs.forEach((doc) => transaction.delete(doc.ref));
+      phases.docs.forEach((doc) => transaction.delete(doc.ref));
+      transaction.update(cohortRef, { PathwaySeeded: false, PlanAnchor: '' });
+      return { archived: archives.length, milestones: milestones.docs.length, phases: phases.docs.length };
+    });
+  }
+
   async setCohortMilestoneDueTime(cohortId: string, milestoneId: string, dueTime: string, actor: string, now: string): Promise<number> {
     const first = await this.db.runTransaction(async (transaction) => {
       const milestoneRef = this.cohortMilestones(cohortId).doc(milestoneId);

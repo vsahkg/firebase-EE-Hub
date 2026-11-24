@@ -255,6 +255,13 @@ export async function deleteCohortMilestone(app: App, cohortId: unknown, milesto
   });
 }
 
+export async function resetCohortPathway(app: App, cohortId: unknown) {
+  const user = await requireAdmin(app, 'RESET_COHORT_PATHWAY');
+  const cohort = await requireSeededCohort(app, cohortId);
+  return audited(app, user, 'RESET_COHORT_PATHWAY', { cohortId: cohort }, () =>
+    app.store.resetCohortPathway(cohort, user.email, nowIso()));
+}
+
 export async function previewCohortMilestoneAssignments(app: App, cohortId: unknown, milestoneId: unknown) {
   await requireAdmin(app, 'PREVIEW_COHORT_MILESTONE_ASSIGNMENTS');
   const cohort = await requireSeededCohort(app, cohortId);

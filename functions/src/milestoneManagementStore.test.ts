@@ -45,6 +45,49 @@ class FakeFirestore {
   }
 }
 
+test('reset archives cohort milestone assignments and atomically clears the pathway', async () => {
+  const db = new FakeFirestore();
+  const store = new Store(db as unknown as Firestore);
+  const cohort = `${COLLECTIONS.cohorts}/2027`;
+  const milestone = { milestoneId: 'm1', phase: 'topic', milestoneTitle: 'Draft' };
+  const task = { TaskId: 'task', StudentId: 'former@example.edu', TemplateId: 'm1', CreatorType: 'System', cohortId: '2027', Status: 'Completed' };
+  db.records.set(cohort, { Cohort: '2027', PathwaySeeded: true, PlanAnchor: '2027-12-01', Status: 'Active' });
+  db.records.set(`${cohort}/phases/topic`, { phaseId: 'topic' });
+  db.records.set(`${cohort}/milestones/m1`, milestone);
+  db.records.set(`${COLLECTIONS.studentActionItems}/task`, task);
+  db.records.set(`${COLLECTIONS.studentActionItems}/other`, { ...task, TaskId: 'other', cohortId: '2026' });
+  db.records.set(`${COLLECTIONS.studentActionItems}/personal`, { TaskId: 'personal', cohortId: '2027', CreatorType: 'Student' });
+  assert.deepEqual(await store.resetCohortPathway('2027', 'admin', 'now'), { archived: 1, milestones: 1, phases: 1 });
+  assert.deepEqual(db.records.get(cohort), { Cohort: '2027', PathwaySeeded: false, PlanAnchor: '', Status: 'Active' });
+  assert.equal(db.records.has(`${cohort}/phases/topic`), false);
+  assert.equal(db.records.has(`${cohort}/milestones/m1`), false);
+  assert.equal(db.records.has(`${COLLECTIONS.studentActionItems}/task`), false);
+  assert.equal(db.records.has(`${COLLECTIONS.studentActionItems}/other`), true);
+  assert.equal(db.records.has(`${COLLECTIONS.studentActionItems}/personal`), true);
+  const archive = [...db.records.entries()].find(([path]) => path.startsWith(`${cohort}/milestoneAssignmentArchive/`));
+  assert.deepEqual(archive?.[1], { task, milestone, archivedAt: 'now', archivedBy: 'admin' });
+  await assert.rejects(store.resetCohortPathway('2027', 'admin', 'now'), /no longer has a pathway/);
+});
+
+test('reset refuses ambiguous and orphaned assignments without changing the pathway', async () => {
+  const db = new FakeFirestore();
+  const store = new Store(db as unknown as Firestore);
+  const cohort = `${COLLECTIONS.cohorts}/2027`;
+  db.records.set(cohort, { PathwaySeeded: true, PlanAnchor: '2027-12-01' });
+  db.records.set(`${cohort}/phases/topic`, { phaseId: 'topic' });
+  db.records.set(`${cohort}/milestones/m1`, { milestoneId: 'm1' });
+  db.records.set(`${cohort}/members/student@example.edu`, { StudentId: 'student@example.edu' });
+  db.records.set(`${COLLECTIONS.studentActionItems}/legacy`, { TaskId: 'legacy', StudentId: 'student@example.edu', TemplateId: 'm1', CreatorType: 'System' });
+  const before = new Map(db.records);
+  await assert.rejects(store.resetCohortPathway('2027', 'admin', 'now'), /legacy assignment/);
+  assert.deepEqual(db.records, before);
+  db.records.delete(`${COLLECTIONS.studentActionItems}/legacy`);
+  db.records.set(`${COLLECTIONS.studentActionItems}/orphan`, { TaskId: 'orphan', StudentId: 'student@example.edu', TemplateId: 'missing', cohortId: '2027' });
+  const orphaned = new Map(db.records);
+  await assert.rejects(store.resetCohortPathway('2027', 'admin', 'now'), /missing milestone/);
+  assert.deepEqual(db.records, orphaned);
+});
+
 test('cohort due time updates every system assignment in batches without changing dates or other cohorts', async () => {
   const db = new FakeFirestore();
   const store = new Store(db as unknown as Firestore);
