@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { state } from '../shared/state.js';
 import {
+  bindJourney,
   bindJourneyDisclosures,
   journeyHereCard,
   journeyOverview,
@@ -49,6 +50,92 @@ test('milestone due time is shown when present', () => {
   state.journeyExpanded = {};
   assert.match(renderJourneyMilestone(home, template, { ...item, DueDate: '2027-01-02', DueTime: '15:30' }, null), /2 Jan 2027 · 15:30 HKT/);
   assert.doesNotMatch(renderJourneyMilestone(home, template, { ...item, DueDate: '2027-01-02' }, null), /HKT/);
+});
+
+test('checking an assigned milestone sends its task id and can be undone', async () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  const calls = [];
+  globalThis.document = { getElementById() { return null; }, querySelectorAll() { return []; } };
+  globalThis.window = { eeCall(method, args) { calls.push([method, args]); return Promise.resolve({}); } };
+  try {
+    const record = { ...home, staffView: false, canUpdateMilestones: false, actionItems: [{ ...item, CreatorType: 'System' }] };
+    state.user = { role: 'student', email: record.email };
+    state.studentHome = record;
+    state.journeySync = {};
+    state.mutationQueues = {};
+    const card = { dataset: { taskId: 'task1', milestoneId: 'm1' } };
+    const box = {
+      dataset: { milestoneId: 'm1' }, checked: true, disabled: false,
+      closest(selector) { return selector === '[data-task-id]' ? card : this; },
+      addEventListener(event, callback) { this.change = callback; },
+    };
+    const host = {
+      id: 'journey-module', innerHTML: '',
+      querySelector() { return null; },
+      querySelectorAll(selector) { return selector === '[data-milestone-check]' ? [box] : []; },
+    };
+    bindJourney(host, record, 'p1');
+    box.change();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(calls[0], ['setActionItemStatus', ['task1', 'Completed', '', '2027', '']]);
+    assert.equal(record.actionItems[0].Status, 'Completed');
+    box.checked = false;
+    box.change();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls[1][1][1], 'Pending');
+    assert.equal(record.actionItems[0].Status, 'Pending');
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+    state.user = null;
+    state.studentHome = null;
+  }
+});
+
+test('missing milestones are checkable only when the server grants status access', () => {
+  const permitted = renderJourneyMilestone({ ...home, canUpdateMilestones: false }, { ...template, canUpdateStatus: true }, null, null);
+  const denied = renderJourneyMilestone({ ...home, canUpdateMilestones: false }, { ...template, canUpdateStatus: false }, null, null);
+  assert.match(permitted, /data-milestone-check[^>]*aria-label/);
+  assert.doesNotMatch(permitted, /data-milestone-check[^>]*disabled/);
+  assert.match(denied, /data-milestone-check[^>]*disabled/);
+});
+
+test('checking a missing student milestone creates it and refreshes the journey', async () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  const calls = [];
+  const record = { ...home, staffView: false, canUpdateMilestones: false, templates: [{ ...template, mOwner: 'student', canUpdateStatus: true }], actionItems: [] };
+  const fresh = { ...record, actionItems: [{ ...item, CreatorType: 'System', Status: 'Completed' }] };
+  globalThis.document = { getElementById() { return null; }, querySelectorAll() { return []; } };
+  globalThis.window = { eeCall(method, args) { calls.push([method, args]); return Promise.resolve(method === 'getStudentHome' ? fresh : {}); } };
+  try {
+    state.user = { role: 'student', email: record.email };
+    state.studentHome = record;
+    state.journeySync = {};
+    state.mutationQueues = {};
+    const box = {
+      dataset: { milestoneId: 'm1' }, checked: true, disabled: false,
+      closest() { return { dataset: { taskId: '', milestoneId: 'm1' } }; },
+      addEventListener(event, callback) { this.change = callback; },
+    };
+    const host = {
+      id: 'journey-module', innerHTML: '',
+      querySelector() { return null; },
+      querySelectorAll(selector) { return selector === '[data-milestone-check]' ? [box] : []; },
+    };
+    bindJourney(host, record, 'p1');
+    box.change();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(calls.map((entry) => entry[0]), ['setStaffMilestoneStatus', 'getStudentHome']);
+    assert.equal(state.studentHome, fresh);
+    assert.equal(fresh.actionItems[0].Status, 'Completed');
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+    state.user = null;
+    state.studentHome = null;
+  }
 });
 
 test('disclosures toggle independently and synchronize both copies of a milestone', () => {

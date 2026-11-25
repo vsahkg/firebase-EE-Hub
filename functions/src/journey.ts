@@ -40,8 +40,11 @@ export async function getStudentHome(app: App) {
   if (user.role !== 'student') return deny(app, user, 'VIEW_STUDENT_HOME', 'Student access required.');
   const placement = await findCurrentPlacement(app, user.email) || { cohortId: '', displayName: user.displayName, email: user.email, studentEmail: user.email, subject: '', supervisorId: '', hrm: '', anchor: '', folder: '', doc: '', rppf: '', poster: '', surname: '', firstName: '', studentNumber: '' };
   const phases = await readPhases(app, placement.cohortId);
-  const templates = orderTemplates(await readTemplates(app, placement.cohortId), phases);
-  const items = await getStudentActionItems(app, user.email, user);
+  const templates = orderTemplates(await readTemplates(app, placement.cohortId), phases).map((template) => ({
+    ...template,
+    canUpdateStatus: !!placement.cohortId && canCompleteMilestone(user, user.email, template.mOwner, template.type, placement),
+  }));
+  const items = await getStudentActionItems(app, user.email, user, placement);
   const events = await readEvents(app, [user.email]);
   const returned = latestReturned(events);
   items.forEach((item) => { item.returnedComment = returned[item.TaskId] ? returned[item.TaskId].comment : ''; });
@@ -232,7 +235,7 @@ export async function getStaffHome(app: App, cohortId: unknown, viewAs: unknown)
 function staffViewLabel(view: string, canUpdate: boolean) {
   if (view === 'coordinator') return canUpdate ? 'Coordinator · you can update every milestone' : 'Coordinator';
   if (view === 'lead') return 'EE Lead';
-  if (view === 'supervisor') return canUpdate ? 'Supervisor · you can update every milestone' : 'Supervisor · you can update milestones you own';
+  if (view === 'supervisor') return canUpdate ? 'Supervisor · you can update every milestone' : 'Supervisor · you can update student and supervisor milestones';
   return 'Staff browse · read only';
 }
 
@@ -248,11 +251,14 @@ export async function getStaffStudentHome(app: App, studentEmail: unknown, cohor
   }
   const context = await staffStudentContext(app, user, email, cohort, 'VIEW_STAFF_STUDENT', viewAs);
   const phases = await readPhases(app, cohort);
-  const templates = orderTemplates(await readTemplates(app, cohort), phases);
-  const items = await getStudentActionItems(app, context.email, user);
+  const canUpdateAll = staffMayUpdateAllMilestones(user, context.roster, context.view);
+  const templates = orderTemplates(await readTemplates(app, cohort), phases).map((template) => ({
+    ...template,
+    canUpdateStatus: !!canUpdateAll || (context.view !== 'staff' && canCompleteMilestone(user, context.email, template.mOwner, template.type, context.roster)),
+  }));
+  const items = await getStudentActionItems(app, context.email, user, context.roster);
   const events = await readEvents(app, [context.email]);
   const returned = latestReturned(events);
-  const canUpdateAll = staffMayUpdateAllMilestones(user, context.roster, context.view);
   items.forEach((item) => {
     item.returnedComment = returned[item.TaskId] ? returned[item.TaskId].comment : '';
     if (item.CreatorType === 'Student') {

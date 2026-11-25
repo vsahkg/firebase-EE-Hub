@@ -6,6 +6,8 @@ Students see Document, Journey, and Supervisor. Published resources sit on Journ
 
 On Journey, select a milestone or to-do heading to expand its details and available actions; select it again to collapse them. Staff see the same controls when viewing a student.
 
+Students can change the status of their own student-owned milestones. Their assigned supervisor can change student- and supervisor-owned milestones, but not coordinator-owned milestones.
+
 Use the milestone owner filter on Journey to show student-owned milestones or all owners. In My Students, open **Journey** to see cohort milestones and due-date groups for the students currently shown; expand a date group to see the students.
 
 Milestone due times are optional and use Hong Kong time (HKT). Edit them on milestone templates or student assignments, including selected-student edits. In Admin → Phases and Milestones → Cohort, **Apply due time** updates the selected cohort milestones and their existing cohort-tagged system assignments; a blank time clears it. Ambiguous legacy assignments without a cohort ID must be resolved first. Large updates run in batches and report progress if interrupted; retry to finish. Timed milestone forms close at the specified time, while date-only deadlines retain their existing behavior.

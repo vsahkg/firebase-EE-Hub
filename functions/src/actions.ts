@@ -1,5 +1,5 @@
 import { canCompleteMilestone, HubUser } from './permissions';
-import { findPlacement, identityAliases, milestoneDocsFor, phaseDocsFor, Placement, readPhases, staffMayAddStudentTodo, staffMayUpdateAllMilestones, staffStudentContext } from './roster';
+import { findCurrentPlacement, findPlacement, identityAliases, milestoneDocsFor, phaseDocsFor, Placement, readPhases, staffMayAddStudentTodo, staffMayUpdateAllMilestones, staffStudentContext } from './roster';
 import { COLLECTIONS, fieldConfig } from './schema';
 import { App, audited, deny, requireAdmin, requireStaff, requireUser } from './session';
 import { addDays, dateOnlyValue, Doc, dueTimeValue, HubError, normalizeEmail, nowIso, parseActionDate, serializeDateOnly, shortId, text, toBoolean, uuid, validateEmail } from './util';
@@ -58,9 +58,9 @@ function newSystemTask(user: HubUser, studentId: string, template: Doc, status: 
   return record;
 }
 
-export async function getStudentActionItems(app: App, studentEmail: string, user: HubUser | null) {
+export async function getStudentActionItems(app: App, studentEmail: string, user: HubUser | null, selectedPlacement?: Placement | null) {
   const normalizedStudentId = normalizeEmail(studentEmail);
-  const placementForTemplates = await findPlacement(app, normalizedStudentId);
+  const placementForTemplates = selectedPlacement === undefined ? await findPlacement(app, normalizedStudentId) : selectedPlacement;
   const records = await actionItemsForAliases(app, identityAliases(placementForTemplates, normalizedStudentId));
   const templates = await milestoneDocsFor(app, placementForTemplates?.cohortId || '');
   const templateOwners: Record<string, string> = {};
@@ -73,6 +73,7 @@ export async function getStudentActionItems(app: App, studentEmail: string, user
   const items = [];
   for (const source of records) {
     const item: Doc = { ...source };
+    if (creatorKind(item) === 'System' && text(item.cohortId) && placementForTemplates?.cohortId && text(item.cohortId) !== placementForTemplates.cohortId) continue;
     item.TaskId = text(item.TaskId);
     item.CreatorType = creatorKind(item);
     item.TemplateId = actionTemplateId(item);
@@ -82,8 +83,7 @@ export async function getStudentActionItems(app: App, studentEmail: string, user
     item.templateType = templateTypes[text(item.TemplateId)] || '';
     item.mOwner = templateOwners[text(item.TemplateId)] || '';
     item.canEdit = item.CreatorType === 'Student' && user && user.role === 'student' && normalizeEmail(item.StudentId) === user.email;
-    const known = item.mOwner === 'supervisor' ? placement : null;
-    item.canUpdate = item.canEdit || (item.CreatorType === 'System' && !!user && canCompleteMilestone(user, item.StudentId, item.mOwner, item.templateType, known));
+    item.canUpdate = item.canEdit || (item.CreatorType === 'System' && !!user && canCompleteMilestone(user, normalizedStudentId, item.mOwner, item.templateType, placement));
     item.formOpen = item.templateType !== 'form' || !formWritesClosed(item.DueDate, new Date(), app.timeZone, item.DueTime);
     items.push(item);
   }
@@ -205,17 +205,16 @@ export async function saveStudentTodo(app: App, taskId: unknown, title: unknown,
   });
 }
 
-async function requireActionStatus(app: App, user: HubUser, item: Doc) {
+async function requireActionStatus(app: App, user: HubUser, item: Doc, studentId: string, placement: Placement | null) {
   if (creatorKind(item) === 'Student') {
-    if (user.role !== 'student' || actionStudentId(item) !== user.email) {
+    if (user.role !== 'student' || studentId !== user.email) {
       return deny(app, user, 'SET_ACTION_ITEM_STATUS', 'Only the creating student can change this To-Do.');
     }
     return;
   }
   if (creatorKind(item) !== 'System') throw new HubError('Unsupported action-item creator type.');
-  const template = await milestoneForStudent(app, actionStudentId(item), actionTemplateId(item));
-  const placement = template && text(template.mOwner).toLowerCase() === 'supervisor' ? await findPlacement(app, actionStudentId(item)) : null;
-  if (!template || !canCompleteMilestone(user, actionStudentId(item), text(template.mOwner).toLowerCase(), text(template.type).toLowerCase(), placement)) {
+  const template = await milestoneForStudent(app, studentId, actionTemplateId(item), placement?.cohortId);
+  if (!template || !canCompleteMilestone(user, studentId, text(template.mOwner).toLowerCase(), text(template.type).toLowerCase(), placement)) {
     return deny(app, user, 'SET_ACTION_ITEM_STATUS', 'Only the milestone owner can change this status.');
   }
 }
@@ -235,6 +234,7 @@ export async function setActionItemStatus(app: App, taskId: unknown, status: unk
   const targetStudentId = user.role === 'student' ? user.email : normalizeEmail(studentEmail);
   const item = await findActionItem(app, text(taskId));
   let staffContext = null as Awaited<ReturnType<typeof staffStudentContext>> | null;
+  let studentPlacement: Placement | null = null;
   let aliases = [targetStudentId];
   if (user.role === 'staff') {
     staffContext = await staffStudentContext(app, user, targetStudentId, text(cohortId), 'SET_ACTION_ITEM_STATUS', viewAs);
@@ -242,14 +242,21 @@ export async function setActionItemStatus(app: App, taskId: unknown, status: unk
     if (creatorKind(item) === 'Student') return deny(app, user, 'SET_ACTION_ITEM_STATUS', 'Staff can only read student to-dos.');
   } else if (user.role !== 'student' || targetStudentId !== user.email) {
     return deny(app, user, 'SET_ACTION_ITEM_STATUS', 'Student access required.');
+  } else {
+    studentPlacement = await findCurrentPlacement(app, user.email);
+    aliases = identityAliases(studentPlacement, user.email);
   }
   if (!sameStudent(item, aliases)) return deny(app, user, 'SET_ACTION_ITEM_STATUS', 'Task belongs to another student.');
+  const selectedCohort = staffContext?.roster.cohortId || studentPlacement?.cohortId;
+  if (creatorKind(item) === 'System' && selectedCohort && text(item.cohortId) && text(item.cohortId) !== selectedCohort) {
+    return deny(app, user, 'SET_ACTION_ITEM_STATUS', 'Milestone belongs to another cohort.');
+  }
   const statusField = fieldConfig('studentActionItems', 'Status');
   if (!statusField?.options?.some((option) => option === status)) throw new HubError('Choose a valid task status.');
   if (staffContext) {
     if (!await staffMayUpdateSystemItem(app, user, staffContext, item)) return deny(app, user, 'SET_ACTION_ITEM_STATUS', 'You cannot update this milestone.');
   } else {
-    await requireActionStatus(app, user, item);
+    await requireActionStatus(app, user, item, targetStudentId, studentPlacement);
   }
   return audited(app, user, 'UPDATE_ACTION_ITEM_STATUS', { taskId: text(taskId), studentId: targetStudentId, status }, async () => {
     const current = await findActionItem(app, text(taskId));
@@ -590,27 +597,40 @@ export async function updateMilestoneAssignment(app: App, taskId: unknown, stude
 }
 
 export async function setStaffMilestoneStatus(app: App, studentEmail: unknown, cohortId: unknown, milestoneId: unknown, status: unknown, viewAs: unknown) {
-  const editor = await requireMilestoneEditor(app, studentEmail, cohortId, viewAs, 'SET_STAFF_MILESTONE_STATUS');
+  const user = await requireUser(app, 'SET_STAFF_MILESTONE_STATUS');
+  let context: { email: string; roster: Placement; view: string };
+  if (user.role === 'staff') {
+    context = await staffStudentContext(app, user, text(studentEmail), text(cohortId), 'SET_STAFF_MILESTONE_STATUS', viewAs);
+  } else {
+    const roster = await findCurrentPlacement(app, user.email);
+    if (!roster || roster.cohortId !== text(cohortId)) return deny(app, user, 'SET_STAFF_MILESTONE_STATUS', 'Student is not in the selected cohort.');
+    context = { email: user.email, roster, view: 'student' };
+  }
   const nextStatus = requireTaskStatus(status);
   const milestone = text(milestoneId);
   if (!milestone) throw new HubError('Choose a milestone.');
-  const template = await milestoneForStudent(app, editor.context.email, milestone, cohortId);
+  const template = await milestoneForStudent(app, context.email, milestone, context.roster.cohortId);
   if (!template) throw new HubError('Milestone template not found.');
-  const aliases = identityAliases(editor.context.roster, editor.context.email);
-  return audited(app, editor.user, 'SET_STAFF_MILESTONE_STATUS', {
-    studentId: editor.context.email,
+  const allowed = user.role === 'staff'
+    ? staffMayUpdateAllMilestones(user, context.roster, context.view) || (context.view !== 'staff' && canCompleteMilestone(user, context.email, template.mOwner, template.type, context.roster))
+    : canCompleteMilestone(user, context.email, template.mOwner, template.type, context.roster);
+  if (!allowed) return deny(app, user, 'SET_STAFF_MILESTONE_STATUS', 'You cannot update this milestone.');
+  const aliases = identityAliases(context.roster, context.email);
+  return audited(app, user, 'SET_STAFF_MILESTONE_STATUS', {
+    studentId: context.email,
     cohort: text(cohortId),
     milestoneId: text(template.milestoneId),
     status: nextStatus,
   }, async () => {
-    const tasks = await systemTasksForAliases(app, aliases, text(template.milestoneId));
+    const tasks = (await systemTasksForAliases(app, aliases, text(template.milestoneId)))
+      .filter((item) => !text(item.cohortId) || text(item.cohortId) === context.roster.cohortId);
     const targets = tasks.length
       ? tasks
-      : [newSystemTask(editor.user, editor.context.email, template, nextStatus, initialDueDate(editor.context.roster, template, ''), text(cohortId))];
+      : [newSystemTask(user, context.email, template, nextStatus, initialDueDate(context.roster, template, ''), text(cohortId))];
     for (const item of targets) {
       item.Status = nextStatus;
       item.LastUpdated = nowIso();
-      stampActors(item, editor.user.email, !text(item.CreatedBy));
+      stampActors(item, user.email, !text(item.CreatedBy));
       await app.store.set(COLLECTIONS.studentActionItems, text(item.TaskId), item);
     }
     return { status: nextStatus, taskId: text(targets[0].TaskId), updated: targets.length };

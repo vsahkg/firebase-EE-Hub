@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { massUpdateMilestones, recordMilestoneDecision, setActionItemStatus, setStaffMilestoneStatus, updateMilestoneAssignment } from './actions';
-import { getStaffHome, getStaffStudentHome } from './journey';
+import { getStudentActionItems, massUpdateMilestones, recordMilestoneDecision, setActionItemStatus, setStaffMilestoneStatus, updateMilestoneAssignment } from './actions';
+import { getStaffHome, getStaffStudentHome, getStudentHome } from './journey';
 import { COLLECTIONS } from './schema';
 import { App } from './session';
 import { Store } from './store';
@@ -332,4 +332,67 @@ test('a task stored under Student Email can still be checked off by a coordinato
   const updated = await store.get(COLLECTIONS.studentActionItems, 'task-m1-a');
   assert.equal(updated && updated.Status, 'Completed');
   assert.equal(updated && updated.StudentId, mail);
+});
+
+test('students can toggle their own milestones, including those stored under their email alias', async () => {
+  const store = new MemoryStore();
+  await seed(store);
+  await store.set(COLLECTIONS.studentUsers, studentEmail, { StudentId: studentEmail });
+  const mail = 'jamie.mail@vsa.example.edu';
+  store.members['2026'][studentEmail]['Student Email'] = mail;
+  await store.set(COLLECTIONS.studentActionItems, 'task-m1-a', { ...await store.get(COLLECTIONS.studentActionItems, 'task-m1-a'), StudentId: mail });
+  const app = appFor(store, studentEmail);
+  const items = await getStudentActionItems(app, studentEmail, { email: studentEmail, displayName: 'Jamie', role: 'student' });
+  assert.equal(items.find((entry) => entry.TaskId === 'task-m1-a')?.canUpdate, true);
+  await setActionItemStatus(app, 'task-m1-a', 'Completed', '', '2026', '');
+  await setActionItemStatus(app, 'task-m1-a', 'Pending', '', '2026', '');
+  assert.equal((await store.get(COLLECTIONS.studentActionItems, 'task-m1-a'))?.Status, 'Pending');
+  await assert.rejects(setActionItemStatus(app, 'task-m1-b', 'Completed', '', '2026', ''), /Access denied/);
+});
+
+test('assigned supervisors can update student and supervisor milestones, but not coordinator milestones', async () => {
+  const store = new MemoryStore();
+  await seed(store);
+  for (const [id, owner] of [['m3', 'supervisor'], ['m4', 'coordinator']]) {
+    await store.set(COLLECTIONS.milestoneTemplates, id, { milestoneId: id, milestoneTitle: id, phase: 'research', type: 'meeting', mOwner: owner, position: 3 });
+    await store.set(COLLECTIONS.studentActionItems, `task-${id}`, task(`task-${id}`, studentEmail, id, 'Pending', ''));
+  }
+  const app = appFor(store, supervisorEmail);
+  const home = await getStaffStudentHome(app, studentEmail, '2026', 'supervisor');
+  for (const id of ['task-m1-a', 'task-m3']) assert.equal(home.actionItems.find((item) => item.TaskId === id)?.canUpdate, true);
+  assert.equal(home.actionItems.find((item) => item.TaskId === 'task-m4')?.canUpdate, false);
+  for (const id of ['task-m1-a', 'task-m3']) {
+    await setActionItemStatus(app, id, 'Completed', studentEmail, '2026', 'supervisor');
+    await setActionItemStatus(app, id, 'Pending', studentEmail, '2026', 'supervisor');
+    assert.equal((await store.get(COLLECTIONS.studentActionItems, id))?.Status, 'Pending');
+  }
+  await assert.rejects(setActionItemStatus(app, 'task-m4', 'Completed', studentEmail, '2026', 'supervisor'), /Access denied/);
+  store.members['2026'][otherEmail].supervisorId = 'another@vsa.example.edu';
+  await assert.rejects(setActionItemStatus(app, 'task-m1-b', 'Pending', otherEmail, '2026', 'supervisor'), /Access denied/);
+});
+
+test('missing milestones can be checked only by an authorized student or supervisor', async () => {
+  const store = new MemoryStore();
+  await seed(store);
+  await store.set(COLLECTIONS.studentUsers, otherEmail, { StudentId: otherEmail });
+  await store.set(COLLECTIONS.milestoneTemplates, 'm3', { milestoneId: 'm3', milestoneTitle: 'Review', phase: 'research', type: 'approval', mOwner: 'supervisor' });
+  await store.set(COLLECTIONS.milestoneTemplates, 'm4', { milestoneId: 'm4', milestoneTitle: 'Coordination', phase: 'research', type: 'meeting', mOwner: 'coordinator' });
+  const student = appFor(store, otherEmail);
+  const supervisor = appFor(store, supervisorEmail);
+  const studentHome = await getStudentHome(student);
+  assert.equal(studentHome.templates.find((entry) => entry.milestoneId === 'm2')?.canUpdateStatus, true);
+  assert.equal(studentHome.templates.find((entry) => entry.milestoneId === 'm3')?.canUpdateStatus, false);
+  const home = await getStaffStudentHome(supervisor, otherEmail, '2026', 'supervisor');
+  assert.equal(home.templates.find((entry) => entry.milestoneId === 'm2')?.canUpdateStatus, true);
+  assert.equal(home.templates.find((entry) => entry.milestoneId === 'm3')?.canUpdateStatus, true);
+  assert.equal(home.templates.find((entry) => entry.milestoneId === 'm4')?.canUpdateStatus, false);
+  await assert.rejects(setStaffMilestoneStatus(student, otherEmail, '2026', 'm3', 'Completed', ''), /Access denied/);
+  await assert.rejects(setStaffMilestoneStatus(supervisor, otherEmail, '2026', 'm4', 'Completed', 'supervisor'), /Access denied/);
+  await assert.rejects(setStaffMilestoneStatus(supervisor, otherEmail, '2026', 'm4', 'Completed', 'staff'), /Access denied/);
+  await setStaffMilestoneStatus(student, otherEmail, '2026', 'm2', 'Completed', '');
+  await setStaffMilestoneStatus(supervisor, otherEmail, '2026', 'm3', 'Completed', 'supervisor');
+  const rows = await store.list(COLLECTIONS.studentActionItems);
+  assert.equal(rows.find((item) => item.StudentId === otherEmail && item.TemplateId === 'm2')?.Status, 'Completed');
+  assert.equal(rows.find((item) => item.StudentId === otherEmail && item.TemplateId === 'm3')?.Status, 'Completed');
+  assert.equal(rows.some((item) => item.StudentId === otherEmail && item.TemplateId === 'm4'), false);
 });

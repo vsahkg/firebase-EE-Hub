@@ -32,13 +32,12 @@ export function canCompleteMilestone(
   const milestoneOwner = text(owner).toLowerCase();
   if (!user) return false;
   if (user.role === 'staff' && user.permissions && (user.permissions.canAdmin || user.permissions.isCoordinator || user.permissions.isAdmin)) return true;
-  if (milestoneOwner === 'student') return user.role === 'student' && user.email === normalizeEmail(studentEmail);
+  if (milestoneOwner === 'student' && user.role === 'student') return user.email === normalizeEmail(studentEmail);
   if (user.role !== 'staff') return false;
   const placement = knownPlacement || null;
-  if (milestoneOwner === 'supervisor') {
+  if (milestoneOwner === 'supervisor' || milestoneOwner === 'student') {
     if (!placement) return false;
-    if (normalizeEmail(placement.supervisorId) === user.email) return true;
-    return !text(placement.supervisorId) && !!(user.permissions && user.permissions.canAdmin);
+    return !!user.permissions?.isSupervisor && normalizeEmail(placement.supervisorId) === user.email;
   }
   const permissionName = ('is' + milestoneOwner.charAt(0).toUpperCase() + milestoneOwner.slice(1)) as
     | 'isLead'

@@ -221,7 +221,7 @@ export function journeyHereCard(home, current, phaseTitle, zoom, currentPhaseId)
   const shownPhase = milestonePhaseId(current.template, item);
   const title = phaseTitle[shownPhase] || shownPhase;
   const due = item ? milestoneDueLabel(item.DueDate, item.DueTime) : '';
-  const canCheck = milestoneWritable(home, item);
+  const canCheck = milestoneWritable(home, item, current.template);
   const actions = journeyActions(item, current.template, home);
   const check = journeyCheck(item, 'Mark ' + shownTitle + ' done', canCheck, current.template.milestoneId);
   const edit = milestoneEditButton(home, item, shownTitle, current.template);
@@ -269,8 +269,8 @@ export function dueSortKey(value, time) {
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text + ' ' + (time || '24:00') : '9999-99-99';
 }
 
-export function milestoneWritable(home, item) {
-  return !!((item && item.canUpdate) || (home && home.canUpdateMilestones));
+export function milestoneWritable(home, item, template) {
+  return !!((item && item.canUpdate) || (!item && template && template.canUpdateStatus) || (home && home.canUpdateMilestones));
 }
 
 export function journeyCheck(item, label, enabled, milestoneId) {
@@ -284,7 +284,7 @@ export function renderJourneyMilestone(home, template, item, current) {
   const title = milestoneTitleText(template, item);
   const status = item ? item.Status : 'Pending';
   const isHere = current && current.template.milestoneId === template.milestoneId && status !== 'Completed';
-  const canAct = milestoneWritable(home, item);
+  const canAct = milestoneWritable(home, item, template);
   const due = item ? milestoneDueLabel(item.DueDate, item.DueTime) : '';
   const closed = template.type === 'form' && item && item.formOpen === false ? ' · Form closed' : '';
   const check = journeyCheck(item, 'Mark ' + title + ' done', canAct, template.milestoneId);
@@ -393,7 +393,7 @@ export function bindJourney(main, home, currentPhaseId) {
   });
   main.querySelectorAll('[data-milestone-check]').forEach(function(box) {
     box.addEventListener('change', function() {
-      const card = box.closest('[data-task-id], [data-milestone-id]');
+      const card = box.closest('[data-task-id]');
       const taskId = (card && card.dataset.taskId) || '';
       const milestoneId = box.dataset.milestoneId || (card && card.dataset.milestoneId) || '';
       const syncKey = taskId || milestoneId;
@@ -425,7 +425,7 @@ export function bindJourney(main, home, currentPhaseId) {
         });
         return;
       }
-      if (!home.staffView || !home.canUpdateMilestones || !milestoneId) {
+      if (!milestoneId) {
         box.checked = !box.checked;
         return;
       }
@@ -434,10 +434,13 @@ export function bindJourney(main, home, currentPhaseId) {
       runMutation('setStaffMilestoneStatus', [home.email, home.cohort || '', milestoneId, nextStatus, state.actingAs], {
         key: 'milestone-status:' + milestoneId
       }).then(function() {
-        return callServer('getStaffStudentHome', home.email, home.cohort || '', state.actingAs);
+        return home.staffView
+          ? callServer('getStaffStudentHome', home.email, home.cohort || '', state.actingAs)
+          : callServer('getStudentHome');
       }).then(function(fresh) {
         delete state.journeySync[syncKey];
-        state.staffStudentHome = fresh;
+        if (home.staffView) state.staffStudentHome = fresh;
+        else state.studentHome = fresh;
         paintHere(fresh);
         if (state.section === 'students') repaintStudentPage(fresh);
         showSuccess(nextStatus === 'Completed' ? 'Marked done.' : 'Marked not done.');
