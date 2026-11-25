@@ -3,6 +3,11 @@ import { callServer } from '../shared/api.js';
 import { showError, showSuccess } from '../shared/feedback.js';
 import { escapeHtml, milestoneOwnerTag, textCompare } from '../shared/html.js';
 
+export function isActiveForAllocation(value) {
+  if (value === undefined || value === null || value === '') return true;
+  return value === true || value === 1 || ['1', 'true', 'yes', 'y'].includes(String(value).trim().toLowerCase());
+}
+
 export function openCohortAssignments(cohortId, milestones) {
   openAdminDialog('cohort-assignments', `<div class="form-panel" role="dialog" aria-modal="true" aria-labelledby="cohort-assignments-title">
     <div class="toolbar"><h2 id="cohort-assignments-title">Assign cohort milestones</h2><button type="button" class="button secondary" data-close-admin-dialog>Close</button></div>
@@ -17,10 +22,21 @@ export function openCohortAssignments(cohortId, milestones) {
     const students = (result.records || []).filter(function(row) { return row.StudentId; }).sort(function(a, b) {
       return textCompare(a['Display Name'] || a.StudentId, b['Display Name'] || b.StudentId);
     });
+    // Older servers return eeActive on each roster record but not the derived ID list.
+    let activeIds;
+    if (result.allocationActiveStudentIds === undefined) {
+      activeIds = new Set(students.filter(function(row) { return isActiveForAllocation(row.eeActive); }).map(function(row) { return String(row.StudentId).trim().toLowerCase(); }));
+    } else {
+      if (!Array.isArray(result.allocationActiveStudentIds)) throw new Error('Allocation eligibility could not be loaded. Close and reopen to retry.');
+      activeIds = new Set(result.allocationActiveStudentIds);
+    }
+    const activeCount = students.filter(function(row) { return activeIds.has(String(row.StudentId).trim().toLowerCase()); }).length;
     host.innerHTML = `<form id="cohort-assignment-form">
       <fieldset><legend>Students</legend><label class="check-option"><input type="checkbox" data-select-all="student"> Select all ${students.length} students</label>
+      <button type="button" class="button secondary" id="select-allocation-active">Select active for allocation only (${activeCount})</button>
       <div class="cohort-assignment-options">${students.map(function(row) {
-        return `<label class="check-option"><input type="checkbox" name="student" value="${escapeHtml(row.StudentId)}"> ${escapeHtml(row['Display Name'] || row.StudentId)} <span class="muted">${escapeHtml(row.StudentId)}</span></label>`;
+        const allocationActive = activeIds.has(String(row.StudentId).trim().toLowerCase());
+        return `<label class="check-option"><input type="checkbox" name="student" value="${escapeHtml(row.StudentId)}" data-allocation-active="${allocationActive}"> ${escapeHtml(row['Display Name'] || row.StudentId)} <span class="muted">${escapeHtml(row.StudentId)} · ${allocationActive ? 'Active for allocation' : 'Not active for allocation'}</span></label>`;
       }).join('') || '<p class="muted">No students in this cohort.</p>'}</div></fieldset>
       <fieldset><legend>Milestones</legend><label class="check-option"><input type="checkbox" data-select-all="milestone" checked> Select all ${milestones.length} milestones</label>
       <div class="cohort-assignment-options">${milestones.map(function(row) {
@@ -37,13 +53,29 @@ export function openCohortAssignments(cohortId, milestones) {
     form.querySelector('[data-close-admin-dialog]').addEventListener('click', closeAdminDialog);
     let reviewed = null;
     function invalidate() { reviewed = null; apply.disabled = true; preview.innerHTML = ''; }
+    function syncSelectAll(name) {
+      const box = form.querySelector('[data-select-all="' + name + '"]');
+      const inputs = Array.from(form.querySelectorAll('input[name="' + name + '"]'));
+      const selected = inputs.filter(function(input) { return input.checked; }).length;
+      box.checked = inputs.length > 0 && selected === inputs.length;
+      box.indeterminate = selected > 0 && selected < inputs.length;
+    }
     form.querySelectorAll('[data-select-all]').forEach(function(box) {
       box.addEventListener('change', function() {
         form.querySelectorAll('input[name="' + box.dataset.selectAll + '"]').forEach(function(input) { input.checked = box.checked; });
+        box.indeterminate = false;
         invalidate();
       });
     });
-    form.addEventListener('change', invalidate);
+    form.querySelector('#select-allocation-active').addEventListener('click', function() {
+      form.querySelectorAll('input[name="student"]').forEach(function(input) { input.checked = input.dataset.allocationActive === 'true'; });
+      syncSelectAll('student');
+      invalidate();
+    });
+    form.addEventListener('change', function(event) {
+      if (event.target && (event.target.name === 'student' || event.target.name === 'milestone')) syncSelectAll(event.target.name);
+      invalidate();
+    });
     review.addEventListener('click', function() {
       const students = Array.from(form.querySelectorAll('input[name="student"]:checked')).map(function(input) { return input.value; });
       const ids = Array.from(form.querySelectorAll('input[name="milestone"]:checked')).map(function(input) { return input.value; });

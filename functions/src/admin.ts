@@ -1,4 +1,4 @@
-import { activeSubjectNamesFrom, canonicalSubjectAssignment, orderSubjectsForColours, parseSubjectCell, spectrumColours } from './allocationPure';
+import { activeSubjectNamesFrom, canonicalSubjectAssignment, isEeActive, orderSubjectsForColours, parseSubjectCell, spectrumColours } from './allocationPure';
 import { validatePhasePrerequisites } from './phaseRules';
 import { setCohortMilestoneAnchor } from './cohortPathway';
 import { AnchorMode, reanchorMilestones } from './pathwayPlan';
@@ -79,8 +79,9 @@ export async function getAdminRecords(app: App, entity: string) {
 export async function getCohortMembersForAdmin(app: App, cohortId: unknown) {
   await requireAdmin(app, 'LIST_COHORT_MEMBERS');
   const cohort = await requireCohort(app, text(cohortId), true);
-  const records = (await app.store.listMembers(cohort.id)).map((record) => ({ ...presentStoredIdentifiers(record), hasStudentIdConflict: false }));
-  return { schema: adminSchema('cohortMembers', await phases(app)), headers: tableHeaders('cohortMembers'), records };
+  const records: Doc[] = (await app.store.listMembers(cohort.id)).map((record) => ({ ...presentStoredIdentifiers(record), hasStudentIdConflict: false }));
+  const allocationActiveStudentIds = records.filter((record) => isEeActive(record.eeActive)).map((record) => normalizeEmail(record.StudentId)).filter(Boolean);
+  return { schema: adminSchema('cohortMembers', await phases(app)), headers: tableHeaders('cohortMembers'), records, allocationActiveStudentIds };
 }
 
 async function assertAnotherAdmin(app: App, excludedEmail: string) {

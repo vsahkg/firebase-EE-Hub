@@ -177,6 +177,17 @@ test('a cohort without its own set still reads the template', async () => {
   assert.equal(templates.find((item) => item.milestoneId === 'm1')?.offsetDays, 80);
 });
 
+test('cohort member list reports allocation-active students using allocation eligibility rules', async () => {
+  const store = new MemoryStore();
+  await seedTemplate(store);
+  await store.setMember('2027', 'active@example.edu', { StudentId: ' ACTIVE@example.edu ', eeActive: ' y ' });
+  await store.setMember('2027', 'inactive@example.edu', { StudentId: 'inactive@example.edu', eeActive: false });
+  await store.setMember('2027', 'missing@example.edu', { StudentId: 'missing@example.edu', eeActive: '' });
+  const result = await dispatch(appFor(store, coordinator), 'getCohortMembersForAdmin', ['2027']) as { allocationActiveStudentIds: string[]; records: Doc[] };
+  assert.deepEqual(result.allocationActiveStudentIds.sort(), ['active@example.edu', 'missing@example.edu', student.email].sort());
+  assert.equal(result.records.length, 4);
+});
+
 test('cohort due time dispatch validates access and selections and reports partial progress', async () => {
   const store = new MemoryStore();
   await seedTemplate(store);
